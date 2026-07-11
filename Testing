@@ -1,0 +1,1952 @@
+-- ========== PARÇA 1: BAŞLANGIÇ, DEĞİŞKENLER VE FLING ALTYAPISI ==========
+local player = game.Players.LocalPlayer
+local runService = game:GetService("RunService")
+local userInputService = game:GetService("UserInputService")
+local camera = workspace.CurrentCamera
+local Players = game:GetService("Players")
+
+_G.HomelanderShared = _G.HomelanderShared or {}
+
+local ANIM_IDS = {
+	Fly = {
+		"rbxassetid://99547664544572",
+		"rbxassetid://137006704296145",
+	},
+	FlyIdle = {
+		"rbxassetid://96251694399659",
+		"rbxassetid://70950173927129",
+		"rbxassetid://76981427752730",
+		"rbxassetid://126046533185038",
+		"rbxassetid://108926161397507",
+		"rbxassetid://92901321263182",
+		"rbxassetid://91265501614230",
+		"rbxassetid://107817714498111",
+		"rbxassetid://75136785617617",
+		"rbxassetid://88328893915688",
+	},
+	Emote = {
+		"rbxassetid://114083419135192",
+		"rbxassetid://82731245433251",
+	},
+	Landing = { "rbxassetid://79698004825744" },
+	LaserIdle = { "rbxassetid://138776098529137" },
+}
+
+_G.HomelanderShared.ANIM_IDS = ANIM_IDS
+_G.HomelanderShared.settings = {
+	cameraFollow = false,
+	speedMode = "Normal",
+	cameraShake = true,
+	cameraZoom = true,
+	buttonsLocked = false,
+	landingEnabled = true,
+	laserFlingEnabled = true,
+	laserIdleEnabled = true,
+	shoulderCamera = false,
+}
+
+_G.HomelanderShared.laserSettings = {
+	offsetX = 0.225,
+	offsetY = 0.05,
+	thickness = 1,
+	brightness = 1,
+	spacing = 0.225,
+	colorPreset = "Classic",
+}
+
+local speedValues = { Slow = 90, Normal = 90, Fast = 450 }
+_G.HomelanderShared.speedValues = speedValues
+_G.HomelanderShared.currentSpeed = speedValues.Normal
+_G.HomelanderShared.normalSpeedAcceleration = false
+_G.HomelanderShared.normalSpeedCurrent = 90
+_G.HomelanderShared.normalSpeedTarget = 250
+
+_G.HomelanderShared.flying = false
+_G.HomelanderShared.floating = false
+_G.HomelanderShared.currentTrack = nil
+_G.HomelanderShared.currentType = nil
+_G.HomelanderShared.currentIndices = { Fly = 1, FlyIdle = 1, Emote = 1, Landing = 1, LaserIdle = 1 }
+_G.HomelanderShared.CROSSFADE_TIME = 0.25  -- ★ DÜZELTİLDİ: 0.7 → 0.25
+_G.HomelanderShared.tracks = { Fly = {}, FlyIdle = {}, Emote = {}, Landing = {}, LaserIdle = {} }
+
+-- ★ DEBOUNCE İÇİN YENİ DEĞİŞKENLER
+_G.HomelanderShared._lastTransitionTime = 0
+_G.HomelanderShared._transitionCooldown = 0.2
+
+_G.HomelanderShared.landingCooldown = false
+_G.HomelanderShared.wasInAir = false
+_G.HomelanderShared.oldWalkSpeed = 16
+_G.HomelanderShared.oldJumpPower = 50
+_G.HomelanderShared.oldAutoRotate = true
+_G.HomelanderShared.landingPosition = nil
+_G.HomelanderShared.landingShakeTime = 0
+
+_G.HomelanderShared.originalFOV = nil
+_G.HomelanderShared.shakeTime = 0
+_G.HomelanderShared.effectIntensity = 0
+_G.HomelanderShared.targetIntensity = 0
+_G.HomelanderShared.zoomProgress = 0
+_G.HomelanderShared.targetZoom = 0
+_G.HomelanderShared.laserActive = false
+_G.HomelanderShared.laserCurrentDistance = 0
+_G.HomelanderShared.laserMaxDistance = 1000
+_G.HomelanderShared.laserExtendSpeed = 200
+_G.HomelanderShared.laserRetractSpeed = 800
+
+_G.HomelanderShared.isFlinging = false
+_G.HomelanderShared.clientVisualCFrame = CFrame.new()
+getgenv().OldPos = nil
+getgenv().FPDH = workspace.FallenPartsDestroyHeight
+
+print("Parça 1 Yüklendi - Değişkenler ve ayarlar (Düzeltildi: CROSSFADE=0.25, Debounce eklendi)")-- ========== PARÇA 2: FLING MOTORU ==========
+function _G.HomelanderShared.SkidFling(TargetPlayer)
+    local Character = player.Character
+    local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
+    local RootPart = Humanoid and Humanoid.RootPart
+    local TCharacter = TargetPlayer.Character
+    if not TCharacter or _G.HomelanderShared.isFlinging then return end
+    local THumanoid = TCharacter:FindFirstChildOfClass("Humanoid")
+    local TRootPart = THumanoid and THumanoid.RootPart
+    local THead = TCharacter:FindFirstChild("Head")
+    local Accessory = TCharacter:FindFirstChildOfClass("Accessory")
+    local Handle = Accessory and Accessory:FindFirstChild("Handle")
+    if Character and Humanoid and RootPart then
+        if RootPart.AssemblyLinearVelocity.Magnitude < 50 then getgenv().OldPos = RootPart.CFrame end
+        if THumanoid and THumanoid.Sit then return end
+        if not TCharacter:FindFirstChildWhichIsA("BasePart") then return end
+        _G.HomelanderShared.clientVisualCFrame = RootPart.CFrame
+        _G.HomelanderShared.isFlinging = true
+        local FPos = function(BasePart, Pos, Ang)
+            RootPart.CFrame = CFrame.new(BasePart.Position) * Pos * Ang
+            Character:SetPrimaryPartCFrame(CFrame.new(BasePart.Position) * Pos * Ang)
+            RootPart.AssemblyLinearVelocity = Vector3.new(9e7, 9e7 * 10, 9e7)
+            RootPart.AssemblyAngularVelocity = Vector3.new(9e8, 9e8, 9e8)
+        end
+        local SFBasePart = function(BasePart)
+            local TimeToWait = 0.4
+            local Time = tick()
+            local Angle = 0
+            repeat
+                if RootPart and THumanoid then
+                    if BasePart.AssemblyLinearVelocity.Magnitude < 50 then
+                        Angle = Angle + 100
+                        FPos(BasePart, CFrame.new(0, 1.5, 0) + THumanoid.MoveDirection * BasePart.AssemblyLinearVelocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle),0 ,0))
+                        task.wait()
+                        FPos(BasePart, CFrame.new(0, -1.5, 0) + THumanoid.MoveDirection * BasePart.AssemblyLinearVelocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                        task.wait()
+                    else
+                        FPos(BasePart, CFrame.new(0, 1.5, THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                        task.wait()
+                        FPos(BasePart, CFrame.new(0, -1.5, -THumanoid.WalkSpeed), CFrame.Angles(0, 0, 0))
+                        task.wait()
+                    end
+                end
+            until Time + TimeToWait < tick() or not _G.HomelanderShared.laserActive
+        end
+        workspace.FallenPartsDestroyHeight = 0/0
+        local BV = Instance.new("BodyVelocity")
+        BV.Parent = RootPart
+        BV.Velocity = Vector3.new(0, 0, 0)
+        BV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+        Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+        if TRootPart then SFBasePart(TRootPart)
+        elseif THead then SFBasePart(THead)
+        elseif Handle then SFBasePart(Handle) end
+        BV:Destroy()
+        Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
+        if getgenv().OldPos then
+            RootPart.CFrame = getgenv().OldPos * CFrame.new(0, .5, 0)
+            Character:SetPrimaryPartCFrame(getgenv().OldPos * CFrame.new(0, .5, 0))
+            Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+            for _, part in pairs(Character:GetChildren()) do
+                if part:IsA("BasePart") then
+                    part.AssemblyLinearVelocity = Vector3.new()
+                    part.AssemblyAngularVelocity = Vector3.new()
+                end
+            end
+            workspace.FallenPartsDestroyHeight = getgenv().FPDH
+        end
+        _G.HomelanderShared.isFlinging = false
+    end
+end
+
+runService.RenderStepped:Connect(function()
+    if _G.HomelanderShared.isFlinging and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        for _, part in ipairs(player.Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.AssemblyLinearVelocity = Vector3.new(0,0,0)
+                part.AssemblyAngularVelocity = Vector3.new(0,0,0)
+            end
+        end
+    end
+end)
+
+print("Parça 2 Yüklendi - Fling motoru")-- ========== PARÇA 3: ANİMASYON, UÇUŞ, KAMERA, LANDING (DÜZELTİLMİŞ) ==========
+local shared = _G.HomelanderShared
+if not shared then warn("Parça 1'i çalıştırın!") return end
+
+local TweenService = game:GetService("TweenService")
+shared.settings.shoulderCamera = shared.settings.shoulderCamera or false
+
+local character, humanoid, animator, rootPart
+local bodyVelocity, bodyGyro
+local laserLeftEnd, laserRightEnd
+local laserSound, laserLoopConnection
+local LASER_SOUND_ID = "rbxassetid://114537309582892"
+local reloadAnimationsCallback = nil
+
+local godBubbleGui, godBubbleLabel
+local bubbleCoroutine = nil
+
+-- LAZER RENK FONKSİYONU
+local function getLaserColors()
+	local preset = shared.laserSettings.colorPreset or "Classic"
+	if preset == "Homelander" then
+		return {
+			outer = Color3.fromRGB(180, 0, 0),
+			middle = Color3.fromRGB(255, 60, 20),
+			core = Color3.fromRGB(255, 255, 255)
+		}
+	else
+		return {
+			outer = Color3.fromRGB(180, 0, 0),
+			middle = Color3.fromRGB(255, 90, 90),
+			core = Color3.fromRGB(255, 255, 255)
+		}
+	end
+end
+
+local function spawnGroundBlocks(position)
+	local outerRadius, innerRadius, gridSize, heightForce, lifeTime = 8, 3.5, 3, 55, 2.5
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.FilterDescendantsInstances = {character}
+	for x = -outerRadius, outerRadius, gridSize do
+		for z = -outerRadius, outerRadius, gridSize do
+			local dist = math.sqrt(x*x + z*z)
+			if dist < innerRadius then continue end
+			local result = workspace:Raycast(position + Vector3.new(x, 5, z), Vector3.new(0, -20, 0), rayParams)
+			if result then
+				local part = Instance.new("Part")
+				part.Size = Vector3.new(gridSize, gridSize, gridSize)
+				part.Anchored, part.CanCollide = false, false
+				part.Material, part.Color = result.Material, result.Instance.Color
+				part.Position = result.Position + Vector3.new(0, 1, 0)
+				part.Parent = workspace
+				local dir = Vector3.new(math.random(-10,10)/10, 1, math.random(-10,10)/10).Unit
+				part:ApplyImpulse(dir * heightForce * part.AssemblyMass)
+				part:ApplyAngularImpulse(Vector3.new(math.random(-15,15), math.random(-15,15), math.random(-15,15)) * part.AssemblyMass)
+				task.delay(lifeTime, function() if part then part:Destroy() end end)
+			end
+		end
+	end
+end
+
+-- ★ DÜZELTİLDİ: stopCurrentTrack artık immediate parametresi alıyor
+local function stopCurrentTrack(immediate)
+	if shared.currentTrack then
+		local fadeTime = immediate and 0 or shared.CROSSFADE_TIME
+		shared.currentTrack:Stop(fadeTime)
+		shared.currentTrack = nil
+	end
+	shared.currentType = nil
+end
+
+-- ★ DÜZELTİLDİ: Aynı track ise hiçbir şey yapma (kaldığı yerden devam)
+local function playAnimation(animType, index)
+	if not animator then return end
+	local newTrack = shared.tracks[animType] and shared.tracks[animType][index]
+	if not newTrack then
+		if reloadAnimationsCallback and character then
+			reloadAnimationsCallback(character)
+			newTrack = shared.tracks[animType] and shared.tracks[animType][index]
+			if not newTrack then return end
+		else return end
+	end
+	
+	-- ★ Aynı track ise hiçbir şey yapma (kaldığı yerden devam)
+	if shared.currentTrack == newTrack and newTrack.IsPlaying then
+		return
+	end
+	
+	-- ★ Farklı track ise mevcut track'i crossfade ile durdur
+	if shared.currentTrack and shared.currentTrack ~= newTrack then
+		shared.currentTrack:Stop(shared.CROSSFADE_TIME)
+	end
+	
+	newTrack:Play(shared.CROSSFADE_TIME)
+	shared.currentTrack = newTrack
+	shared.currentType = animType
+	shared.currentIndices[animType] = index
+end
+
+-- ★ DÜZELTİLDİ: Debounce eklendi
+local function updateIdleState()
+	if not humanoid or not character then return end
+	if not shared.flying and not shared.floating and shared.currentType ~= "Emote" then
+		if shared.currentTrack then
+			shared.currentTrack:Stop(shared.CROSSFADE_TIME)
+			shared.currentTrack = nil
+			shared.currentType = nil
+		end
+		return
+	end
+	
+	if (shared.flying or shared.floating) and shared.currentType ~= "Emote" then
+		local moving = humanoid.MoveDirection.Magnitude > 0.1
+		local now = tick()
+		
+		-- ★ Debounce: 0.2sn içinde tekrar geçiş yapma
+		if now - shared._lastTransitionTime < shared._transitionCooldown then
+			return
+		end
+		
+		if moving then
+			if shared.currentType ~= "Fly" and shared.flying then
+				shared._lastTransitionTime = now
+				playAnimation("Fly", shared.currentIndices.Fly)
+			end
+		else
+			local targetAnimType = "FlyIdle"
+			local targetIndex = shared.currentIndices.FlyIdle
+			if shared.laserActive and shared.settings.laserIdleEnabled and shared.tracks.LaserIdle and shared.tracks.LaserIdle[1] then
+				targetAnimType = "LaserIdle"
+				targetIndex = 1
+			end
+			if shared.currentType ~= targetAnimType or shared.currentIndices[targetAnimType] ~= targetIndex then
+				shared._lastTransitionTime = now
+				playAnimation(targetAnimType, targetIndex)
+			end
+		end
+	end
+end
+
+local function checkEmoteCancel()
+	if shared.currentType == "Emote" then
+		local moving = humanoid and humanoid.MoveDirection.Magnitude > 0.1
+		local jumping = humanoid and humanoid.Jump
+		if moving or jumping then 
+			stopCurrentTrack() 
+			updateIdleState() 
+		end
+	end
+end
+
+local function updateSpeed()
+	if shared.floating then
+		shared.currentSpeed = 30
+		shared.normalSpeedAcceleration = false
+	elseif shared.settings.speedMode == "Slow" then
+		shared.currentSpeed = shared.speedValues.Slow
+		shared.normalSpeedAcceleration = false
+	elseif shared.settings.speedMode == "Fast" then
+		shared.currentSpeed = shared.speedValues.Fast
+		shared.normalSpeedAcceleration = false
+	else
+		shared.normalSpeedAcceleration = true
+		shared.normalSpeedCurrent = 90
+		shared.normalSpeedTarget = 250
+		shared.currentSpeed = shared.normalSpeedCurrent
+	end
+end
+
+local function accelerateNormalSpeed(dt)
+	if not shared.normalSpeedAcceleration or not shared.flying then return end
+	if shared.normalSpeedCurrent < shared.normalSpeedTarget then
+		shared.normalSpeedCurrent = math.min(shared.normalSpeedCurrent + (dt * 30), shared.normalSpeedTarget)
+		shared.currentSpeed = shared.normalSpeedCurrent
+	end
+end
+
+local function updateSmoothEffects(dt)
+	if not shared.flying and not shared.floating then
+		shared.targetIntensity, shared.targetZoom = 0, 0
+	else
+		local isMoving = shared.currentType == "Fly" and (shared.flying or shared.floating)
+		if shared.floating then
+			shared.targetIntensity = 0
+			shared.targetZoom = 0
+		else
+			shared.targetIntensity = isMoving and (shared.settings.cameraShake and 1 or 0) or 0
+			shared.targetZoom = isMoving and (shared.settings.cameraZoom and 1 or 0) or 0
+		end
+	end
+	local easeSpeed = 5
+	shared.effectIntensity = shared.effectIntensity + (shared.targetIntensity - shared.effectIntensity) * math.min(dt * easeSpeed, 1)
+	shared.zoomProgress = shared.zoomProgress + (shared.targetZoom - shared.zoomProgress) * math.min(dt * easeSpeed, 1)
+	if shared.zoomProgress > 0.01 and shared.settings.cameraZoom and not shared.floating then
+		if not shared.originalFOV then shared.originalFOV = camera.FieldOfView end
+		camera.FieldOfView = shared.originalFOV + (95 - shared.originalFOV) * shared.zoomProgress
+	elseif shared.zoomProgress <= 0.01 and shared.originalFOV then
+		camera.FieldOfView = shared.originalFOV
+		shared.originalFOV = nil
+	end
+end
+
+local function updateCamera(dt)
+	if not shared.flying and not shared.floating and shared.landingShakeTime <= 0 then return end
+	if shared.landingShakeTime and shared.landingShakeTime > 0 then
+		shared.landingShakeTime = shared.landingShakeTime - dt
+		local intensity = 0.3 * (shared.landingShakeTime / 1)
+		local offset = Vector3.new(math.sin(tick()*80)*intensity, math.cos(tick()*70)*intensity*0.5, math.sin(tick()*90)*intensity)
+		camera.CFrame = camera.CFrame + offset
+		return
+	end
+	if shared.settings.cameraFollow and bodyGyro then
+		local look, up = camera.CFrame.LookVector, camera.CFrame.UpVector
+		bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + look, up)
+	end
+	if shared.effectIntensity > 0.01 and not shared.floating then
+		shared.shakeTime = shared.shakeTime + dt * 30
+		local intensity = 0.12 * shared.effectIntensity
+		local offset = Vector3.new(math.sin(shared.shakeTime*50)*intensity, math.cos(shared.shakeTime*40)*intensity*0.5, math.sin(shared.shakeTime*45)*intensity)
+		camera.CFrame = camera.CFrame + offset
+	else
+		shared.shakeTime = 0
+	end
+	if shared.settings.shoulderCamera then
+		local shoulderOffset = Vector3.new(3.2, 1.3, -1.8)
+		camera.CFrame = camera.CFrame * CFrame.new(shoulderOffset)
+	end
+end
+
+local function updateCollision()
+	if not character then return end
+	for _, part in ipairs(character:GetDescendants()) do
+		if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+			part.CanCollide = not shared.flying and not shared.floating
+		end
+	end
+	if rootPart then rootPart.CanCollide = not shared.flying and not shared.floating end
+end
+
+local function startFly()
+	if shared.flying then return end
+	if not shared.tracks.Fly[1] and reloadAnimationsCallback and character then
+		reloadAnimationsCallback(character)
+	end
+	shared.flying = true
+	updateSpeed()
+	updateCollision()
+	bodyVelocity = Instance.new("BodyVelocity")
+	bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+	bodyVelocity.Velocity = Vector3.zero
+	bodyVelocity.Parent = rootPart
+	bodyGyro = Instance.new("BodyGyro")
+	bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+	bodyGyro.P, bodyGyro.D = 100000, 1000
+	bodyGyro.Parent = rootPart
+	if shared.settings.cameraFollow then
+		local look, up = camera.CFrame.LookVector, camera.CFrame.UpVector
+		bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + look, up)
+	end
+	local moving = humanoid.MoveDirection.Magnitude > 0.1
+	if moving then playAnimation("Fly", shared.currentIndices.Fly)
+	else playAnimation("FlyIdle", shared.currentIndices.FlyIdle) end
+end
+
+local function startFloating()
+	if shared.floating then return end
+	if not shared.tracks.FlyIdle[1] and reloadAnimationsCallback and character then
+		reloadAnimationsCallback(character)
+	end
+	shared.floating = true
+	updateSpeed()
+	updateCollision()
+	bodyVelocity = Instance.new("BodyVelocity")
+	bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+	bodyVelocity.Velocity = Vector3.zero
+	bodyVelocity.Parent = rootPart
+	bodyGyro = Instance.new("BodyGyro")
+	bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+	bodyGyro.P, bodyGyro.D = 100000, 1000
+	bodyGyro.Parent = rootPart
+	if shared.settings.cameraFollow then
+		local look, up = camera.CFrame.LookVector, camera.CFrame.UpVector
+		bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + look, up)
+	end
+	playAnimation("FlyIdle", shared.currentIndices.FlyIdle)
+end
+
+local function stopFly(noCrossfade)
+	if shared.flying then
+		shared.flying = false
+	end
+	if shared.floating then
+		shared.floating = false
+	end
+	if bodyVelocity then bodyVelocity:Destroy(); bodyVelocity = nil end
+	if bodyGyro then bodyGyro:Destroy(); bodyGyro = nil end
+	updateCollision()
+	if shared.originalFOV then
+		camera.FieldOfView = shared.originalFOV
+		shared.originalFOV = nil
+	end
+	shared.targetIntensity, shared.targetZoom, shared.shakeTime = 0, 0, 0
+	if noCrossfade then
+		if shared.currentTrack then shared.currentTrack:Stop(0); shared.currentTrack = nil end
+		shared.currentType = nil
+	else
+		stopCurrentTrack()
+	end
+	updateIdleState()
+end
+
+-- ★ DÜZELTİLDİ: Landing daha yumuşak geçişlerle
+local function performLanding()
+	if shared.laserActive and shared.settings.laserFlingEnabled then
+		return
+	end
+	if not shared.settings.landingEnabled or shared.landingCooldown or not humanoid then return end
+	shared.landingShakeTime = 1
+	if shared.flying then stopFly(true) end
+	shared.landingCooldown = true
+	local rootPos = rootPart.Position
+	local currentYRotation = rootPart.Orientation.Y
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.FilterDescendantsInstances = {character}
+	local rayResult = workspace:Raycast(rootPos + Vector3.new(0, 5, 0), Vector3.new(0, -20, 0), rayParams)
+	local newY
+	if rayResult then
+		local hipHeight = humanoid.HipHeight or 1
+		local halfHeight = rootPart.Size.Y / 2
+		newY = rayResult.Position.Y + hipHeight + halfHeight
+	else
+		newY = rootPos.Y
+	end
+	local landingCF = CFrame.new(rootPos.X, newY, rootPos.Z) * CFrame.Angles(0, math.rad(currentYRotation), 0)
+	rootPart.CFrame = landingCF
+	shared.landingPosition = landingCF
+	spawnGroundBlocks(rootPart.Position)
+	
+	-- ★ DÜZELTİLDİ: 0.15 crossfade ile durdur
+	if animator then
+		for _, trackList in pairs(shared.tracks) do
+			for _, track in pairs(trackList) do
+				if track and track.IsPlaying then
+					track:Stop(0.15)
+				end
+			end
+		end
+	end
+	shared.currentTrack = nil
+	shared.currentType = nil
+	shared.oldWalkSpeed = humanoid.WalkSpeed
+	shared.oldJumpPower = humanoid.JumpPower
+	shared.oldAutoRotate = humanoid.AutoRotate
+	humanoid.WalkSpeed, humanoid.JumpPower, humanoid.AutoRotate = 0, 0, false
+	local landingBodyVelocity = nil
+	if rootPart then
+		landingBodyVelocity = Instance.new("BodyVelocity")
+		landingBodyVelocity.MaxForce = Vector3.new(9e6, 9e6, 9e6)
+		landingBodyVelocity.Velocity = Vector3.new(0, 0, 0)
+		landingBodyVelocity.Parent = rootPart
+	end
+	local landingTrack = nil
+	if shared.tracks.Landing and shared.tracks.Landing[1] then
+		landingTrack = shared.tracks.Landing[1]
+		-- ★ DÜZELTİLDİ: Önceki track'i durdur, sonra landing'i oynat
+		if shared.currentTrack then
+			shared.currentTrack:Stop(0.2)
+		end
+		landingTrack:Play(0.2)
+		landingTrack.Priority = Enum.AnimationPriority.Action4
+		shared.currentTrack = landingTrack
+		shared.currentType = "Landing"
+	end
+	if landingTrack then
+		local finished = false
+		local conn = landingTrack.Stopped:Connect(function() finished = true; conn:Disconnect() end)
+		local timeout = tick() + 10
+		while not finished and tick() < timeout do
+			if rootPart then
+				rootPart.AssemblyLinearVelocity = Vector3.zero
+				rootPart.AssemblyAngularVelocity = Vector3.zero
+			end
+			task.wait()
+		end
+		if not finished then landingTrack:Stop(0.15) end
+	end
+	if landingBodyVelocity then landingBodyVelocity:Destroy() end
+	if humanoid then
+		humanoid.WalkSpeed = shared.oldWalkSpeed
+		humanoid.JumpPower = shared.oldJumpPower
+		humanoid.AutoRotate = shared.oldAutoRotate
+	end
+	if shared.currentTrack and shared.currentTrack == landingTrack then shared.currentTrack = nil end
+	shared.currentType = nil
+	shared.landingCooldown = false
+	shared.landingPosition = nil
+	updateSpeed()
+end
+
+local function createLaserBeams(offset)
+	local head = character and character:FindFirstChild("Head")
+	if not head then return nil end
+	local startAttachment = Instance.new("Attachment")
+	startAttachment.Parent = head
+	startAttachment.Position = Vector3.new(
+		offset.X + shared.laserSettings.offsetX,
+		offset.Y + shared.laserSettings.offsetY,
+		offset.Z
+	)
+	local endPart = Instance.new("Part")
+	endPart.Anchored = true
+	endPart.CanCollide = false
+	endPart.Transparency = 1
+	endPart.Size = Vector3.new(1,1,1)
+	endPart.Parent = workspace
+	local endAttachment = Instance.new("Attachment")
+	endAttachment.Parent = endPart
+
+	local function newBeam(width, color, trans)
+		local b = Instance.new("Beam")
+		b.Attachment0 = startAttachment
+		b.Attachment1 = endAttachment
+		b.FaceCamera = true
+		b.LightEmission = shared.laserSettings.brightness
+		b.Width0 = width
+		b.Width1 = width
+		b.Color = ColorSequence.new(color)
+		b.Transparency = NumberSequence.new(trans)
+		b.Parent = head
+		return b
+	end
+
+	local colors = getLaserColors()
+	local outer = newBeam(0.7, colors.outer, 0.5)
+	local middle = newBeam(0.35, colors.middle, 0.15)
+	local coreWidth = 0.08 * shared.laserSettings.thickness
+	local core = newBeam(coreWidth, colors.core, 0)
+	return {
+		endPart = endPart,
+		startAttachment = startAttachment,
+		endAttachment = endAttachment,
+		outer = outer,
+		middle = middle,
+		core = core
+	}
+end
+
+local function destroyLaserObjects()
+	if laserLeftEnd then
+		for _, obj in pairs(laserLeftEnd) do if obj and obj.Destroy then obj:Destroy() end end
+		laserLeftEnd = nil
+	end
+	if laserRightEnd then
+		for _, obj in pairs(laserRightEnd) do if obj and obj.Destroy then obj:Destroy() end end
+		laserRightEnd = nil
+	end
+end
+
+print("Parça 3 Yüklendi - Animasyon ve uçuş temel fonksiyonları (Düzeltildi: Crossfade, Debounce, Landing yumuşatıldı)")-- ========== PARÇA 4: LAZER SİSTEMİ, GOD DAMN IT! BUBBLE, VIGNETTE VE GÜÇLÜ SÜREKLİ SHAKE ==========
+local shared = _G.HomelanderShared
+if not shared then warn("Parça 1-3'ü çalıştırın!") return end
+
+local TweenService = game:GetService("TweenService")
+
+local vignetteGui
+local vignetteImage
+local vignetteTween
+local laserShakeConnection = nil
+
+local function CreateGodBubble(text, offset)
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "GodBubble"
+	billboard.Size = UDim2.new(0, 60, 0, 18)
+	billboard.StudsOffset = offset
+	billboard.AlwaysOnTop = true
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBold
+	label.TextColor3 = Color3.fromRGB(255, 20, 60)
+	label.TextStrokeTransparency = 0
+	label.TextTransparency = 1
+	label.TextStrokeColor3 = Color3.new(0, 0, 0)
+	label.Text = text
+	label.Parent = billboard
+	return billboard, label
+end
+
+local function FadeIn(label)
+	if not label then return end
+	TweenService:Create(label, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {TextTransparency = 0, TextStrokeTransparency = 0}):Play()
+end
+
+local function FadeOut(label)
+	if not label then return end
+	TweenService:Create(label, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {TextTransparency = 1, TextStrokeTransparency = 1}):Play()
+end
+
+local function HideGodBubble()
+	if bubbleCoroutine then task.cancel(bubbleCoroutine); bubbleCoroutine = nil end
+	local head = character and character:FindFirstChild("Head")
+	if not head then
+		if godBubbleGui then godBubbleGui:Destroy(); godBubbleGui = nil end
+		godBubbleLabel = nil
+		return
+	end
+	for _, gui in ipairs(head:GetChildren()) do
+		if gui:IsA("BillboardGui") and gui.Name == "GodBubble" then
+			local label = gui:FindFirstChildOfClass("TextLabel")
+			if label then
+				FadeOut(label)
+				task.delay(0.25, function() if gui and gui.Parent then gui:Destroy() end end)
+			end
+		end
+	end
+	godBubbleGui = nil; godBubbleLabel = nil
+end
+
+local function ShowGodBubble()
+	HideGodBubble()
+	local head = character and character:FindFirstChild("Head")
+	if not head then return end
+	if bubbleCoroutine then task.cancel(bubbleCoroutine); bubbleCoroutine = nil end
+	bubbleCoroutine = task.spawn(function()
+		task.wait(2)
+		if not shared.laserActive then return end
+		godBubbleGui, godBubbleLabel = CreateGodBubble("GOD DAMN IT!", Vector3.new(-1.8, 1.3, 0))
+		godBubbleGui.Parent = head
+		FadeIn(godBubbleLabel)
+		task.wait(3)
+		if godBubbleLabel then FadeOut(godBubbleLabel) end
+		task.wait(0.25)
+		if godBubbleGui then godBubbleGui:Destroy(); godBubbleGui = nil; godBubbleLabel = nil end
+		bubbleCoroutine = nil
+	end)
+end
+
+local function StartLaserVignette()
+	if vignetteGui then return end
+
+	vignetteGui = Instance.new("ScreenGui")
+	vignetteGui.Name = "LaserVignette"
+	vignetteGui.IgnoreGuiInset = true
+	vignetteGui.ResetOnSpawn = false
+	vignetteGui.Parent = player:WaitForChild("PlayerGui")
+
+	vignetteImage = Instance.new("ImageLabel")
+	vignetteImage.Size = UDim2.fromScale(1, 1)
+	vignetteImage.Position = UDim2.fromScale(0, 0)
+	vignetteImage.BackgroundTransparency = 1
+	vignetteImage.Image = "rbxassetid://15629026059"
+	vignetteImage.ImageColor3 = Color3.fromRGB(255, 0, 0)
+	vignetteImage.ImageTransparency = 0.35
+	vignetteImage.Parent = vignetteGui
+
+	vignetteTween = task.spawn(function()
+		while shared.laserActive and vignetteImage do
+			TweenService:Create(vignetteImage, TweenInfo.new(0.8, Enum.EasingStyle.Sine), {ImageTransparency = 0.25}):Play()
+			task.wait(0.8)
+			if vignetteImage then
+				TweenService:Create(vignetteImage, TweenInfo.new(0.8, Enum.EasingStyle.Sine), {ImageTransparency = 0.45}):Play()
+			end
+			task.wait(0.8)
+		end
+	end)
+end
+
+local function StopLaserVignette()
+	if vignetteTween then
+		task.cancel(vignetteTween)
+		vignetteTween = nil
+	end
+	if vignetteGui then
+		vignetteGui:Destroy()
+		vignetteGui = nil
+		vignetteImage = nil
+	end
+end
+
+local function StartLaserShake()
+	if laserShakeConnection then return end
+	local cam = workspace.CurrentCamera
+	if not cam then return end
+
+	laserShakeConnection = runService.RenderStepped:Connect(function()
+		if not shared.laserActive or not cam then
+			StopLaserShake()
+			return
+		end
+		local strength = 0.35
+		local x = (math.random() - 0.5) * strength
+		local y = (math.random() - 0.5) * strength
+		cam.CFrame = cam.CFrame * CFrame.new(x, y, 0)
+	end)
+end
+
+local function StopLaserShake()
+	if laserShakeConnection then
+		laserShakeConnection:Disconnect()
+		laserShakeConnection = nil
+	end
+end
+
+local function startLaserSound()
+    if laserSound then laserSound:Stop(); laserSound:Destroy(); laserSound = nil end
+    if laserLoopConnection then laserLoopConnection:Disconnect(); laserLoopConnection = nil end
+    laserSound = Instance.new("Sound")
+    laserSound.SoundId, laserSound.Volume, laserSound.Looped = LASER_SOUND_ID, 1, false
+    laserSound.Parent = character:FindFirstChild("Head") or character
+    laserSound.TimePosition = 0
+    laserSound:Play()
+    task.wait(1.5)
+    if laserSound and shared.laserActive then
+        laserSound.TimePosition = 1.5
+        laserSound:Play()
+        laserLoopConnection = runService.RenderStepped:Connect(function()
+            if laserSound and shared.laserActive and laserSound.TimePosition >= 2.70 then
+                laserSound.TimePosition = 1.5
+            end
+        end)
+    end
+end
+
+local function stopLaserSound()
+    if laserLoopConnection then laserLoopConnection:Disconnect(); laserLoopConnection = nil end
+    if laserSound then
+        laserSound:Stop(); laserSound:Destroy()
+        local endSound = Instance.new("Sound")
+        endSound.SoundId, endSound.Volume, endSound.Looped = LASER_SOUND_ID, 1, false
+        endSound.TimePosition = 2.70
+        endSound.Parent = character:FindFirstChild("Head") or character
+        endSound:Play()
+        endSound.Ended:Connect(function() endSound:Destroy() end)
+        laserSound = nil
+    end
+end
+
+local function updateLaser(dt)
+	if not character or not character:FindFirstChild("Head") then destroyLaserObjects(); return end
+	local head = character.Head
+	if shared.laserActive then
+		shared.laserCurrentDistance = math.min(shared.laserCurrentDistance + shared.laserExtendSpeed * dt, shared.laserMaxDistance)
+		if not laserLeftEnd or not laserRightEnd then
+			destroyLaserObjects()
+			local sp = shared.laserSettings.spacing
+			laserLeftEnd = createLaserBeams(Vector3.new(-sp, 0.05, -0.48))
+			laserRightEnd = createLaserBeams(Vector3.new(sp, 0.05, -0.48))
+		end
+        local rayParams = RaycastParams.new()
+        rayParams.FilterType = Enum.RaycastFilterType.Exclude
+        rayParams.FilterDescendantsInstances = {character}
+        local rayResult = workspace:Raycast(head.Position, head.CFrame.LookVector * shared.laserCurrentDistance, rayParams)
+        if rayResult and rayResult.Instance then
+            local hitModel = rayResult.Instance:FindFirstAncestorOfClass("Model")
+            local hitPlayer = hitModel and Players:GetPlayerFromCharacter(hitModel)
+            if hitPlayer and hitPlayer ~= player and not shared.isFlinging and shared.settings.laserFlingEnabled then
+                task.spawn(function() shared.SkidFling(hitPlayer) end)
+            end
+        end
+	else
+		shared.laserCurrentDistance = math.max(shared.laserCurrentDistance - shared.laserRetractSpeed * dt, 0)
+		if shared.laserCurrentDistance <= 0 then destroyLaserObjects() end
+	end
+	if laserLeftEnd and laserRightEnd then
+		local look = head.CFrame.LookVector
+		local forwardOffset = look * shared.laserCurrentDistance
+		local leftPos = (head.Position + head.CFrame.RightVector * -shared.laserSettings.spacing + Vector3.new(0,0.05,0)) + forwardOffset
+		local rightPos = (head.Position + head.CFrame.RightVector * shared.laserSettings.spacing + Vector3.new(0,0.05,0)) + forwardOffset
+		laserLeftEnd.endPart.Position = leftPos
+		laserRightEnd.endPart.Position = rightPos
+	end
+end
+
+local function toggleLaser()
+    if shared.laserActive then
+        shared.laserActive = false
+        stopLaserSound()
+        HideGodBubble()
+        StopLaserVignette()
+        StopLaserShake()
+        updateIdleState()
+    else
+        shared.laserActive = true
+        shared.laserCurrentDistance = 0
+        StartLaserVignette()
+        StartLaserShake()
+        startLaserSound()
+        ShowGodBubble()
+        updateIdleState()
+    end
+end
+
+shared.updateLaserSettings = function(setting, value)
+    if setting == "offsetX" then
+        shared.laserSettings.offsetX = math.clamp(value, -1, 1)
+    elseif setting == "offsetY" then
+        shared.laserSettings.offsetY = math.clamp(value, -1, 1)
+    elseif setting == "thickness" then
+        shared.laserSettings.thickness = math.clamp(value, 0.1, 3)
+    elseif setting == "brightness" then
+        shared.laserSettings.brightness = math.clamp(value, 0.1, 3)
+    elseif setting == "spacing" then
+        shared.laserSettings.spacing = math.clamp(value, 0.05, 1.0)
+    end
+    if shared.laserActive then
+        destroyLaserObjects()
+        local sp = shared.laserSettings.spacing
+        laserLeftEnd = createLaserBeams(Vector3.new(-sp, 0.05, -0.48))
+        laserRightEnd = createLaserBeams(Vector3.new(sp, 0.05, -0.48))
+    end
+end
+
+shared.stopFly = stopFly
+shared.startFly = startFly
+shared.startFloating = startFloating
+shared.toggleLaser = toggleLaser
+shared.updateLaser = updateLaser
+shared.performLanding = performLanding
+shared.stopCurrentTrack = stopCurrentTrack
+shared.playAnimation = playAnimation
+shared.updateIdleState = updateIdleState
+shared.checkEmoteCancel = checkEmoteCancel
+shared.accelerateNormalSpeed = accelerateNormalSpeed
+shared.updateSmoothEffects = updateSmoothEffects
+shared.updateCamera = updateCamera
+shared.stopLaserSound = stopLaserSound
+shared.setReloadCallback = function(cb) reloadAnimationsCallback = cb end
+shared.destroyLaserObjects = destroyLaserObjects
+
+print("Parça 4 Yüklendi - Lazer, GOD DAMN IT!, Vignette, Güçlü Sürekli Shake (0.35)")-- ========== PARÇA 5: GUI VE BUTONLAR (RANDOM MESAJ MENÜSÜ + LAZER RENK SEÇENEKLERİ + FLOATING) ==========
+local shared = _G.HomelanderShared
+if not shared then
+    warn("Lütfen önce Parça 1-4'ü çalıştırın!")
+    return
+end
+
+local GUI_IMAGES = {
+	Emote = "rbxassetid://10585035296",
+	Fly = "rbxassetid://78704793921372",
+	Settings = "rbxassetid://1402032199",
+	Homelander = "rbxassetid://98935131922405",
+	Laser = "rbxassetid://117889798979829",
+	XRay = "rbxassetid://11209584833",
+	Supe = "rbxassetid://6031098377",
+	Random = "rbxassetid://6031098377",
+	LaserSettings = "rbxassetid://6031098377",
+	Floating = "rbxassetid://102237739472081",
+}
+
+local buttonStates = {}
+
+local randomMessages = {
+	{ text = "Ashley Don't look at him, look at me. ASHLEY! Look at me.", soundId = "rbxassetid://94680748830780" },
+	{ text = "The only man in the sky, is me.", soundId = "rbxassetid://97863436735876" },
+	{ text = "I don't make mistakes. I'm not 'just like the rest of you.' I'm stronger. I'm smarter. I'm better. I am better.", soundId = "rbxassetid://126341171253122" },
+	{ text = "You people should be thanking Christ that I am who and what I am, because you need me. You need me to save you.", soundId = nil },
+	{ text = "You're not the real heroes. I'm the real hero. I'm the real hero.", soundId = nil },
+	{ text = "What... kind of animal are you? (...) Do you like attacking your own kind? (...) Stay back.", soundId = nil },
+	{ text = "Hey You Stay Back! All Of You, Stay Back... HEY YOU STAY BACK OR I'M GONNA LASER YOU! I'LL LASER EVERY ONE OF YOU!", soundId = nil },
+	{ text = "I AM GOD!", soundId = "rbxassetid://96586859247356" },
+	{ text = "hahaha...HAHAHAHAHA!", soundId = "rbxassetid://140589325002177" },
+	{ text = "Yummers", soundId = "rbxassetid://135085041040927" },
+	{ text = "I AM THE HOMELANDER", soundId = "rbxassetid://123453286444445" },
+}
+
+local randomDisplayNames = {
+	"Ashley",
+	"The Only Man",
+	"I'm Better",
+	"You People",
+	"I'm The Real Hero",
+	"Stay Back",
+	"I'M GONNA LASER YOU",
+	"I AM GOD!",
+	"hahaha..",
+	"Yummers",
+	"I AM THE.."
+}
+
+local xrayEnabled, xrayAffectedParts = false, {}
+local supeEnabled, supeConnections, supeLabels = false, {}, {}
+local MAX_SUPE_MESSAGES = 15
+local homelanderActive, randomActive, flying = false, false, false
+local floatingActive = false
+local flyAnimationVersion = 1
+
+local quoteMenu = nil
+local quoteMenuVisible = false
+
+local function createRoundedButton(parent, name, imageId, posX, posY, sizeX, sizeY, isToggle, getState, setState)
+	local btnFrame = Instance.new("Frame")
+	btnFrame.Name = name .. "Frame"
+	btnFrame.Size = UDim2.new(0, sizeX or 55, 0, sizeY or 55)
+	btnFrame.Position = UDim2.new(0, posX, 0, posY)
+	btnFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+	btnFrame.BackgroundTransparency = 0.2
+	btnFrame.BorderSizePixel = 2
+	btnFrame.BorderColor3 = Color3.fromRGB(80, 80, 100)
+	btnFrame.Parent = parent
+	local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 8); corner.Parent = btnFrame
+	local glow = Instance.new("Frame")
+	glow.Name = "Glow"; glow.Size = UDim2.new(1,0,1,0); glow.BackgroundColor3 = Color3.fromRGB(255,0,0); glow.BackgroundTransparency = 0.85; glow.BorderSizePixel = 0; glow.Visible = false
+	local gc = Instance.new("UICorner"); gc.CornerRadius = UDim.new(0,8); gc.Parent = glow; glow.Parent = btnFrame
+	local innerGlow = Instance.new("Frame")
+	innerGlow.Name = "InnerGlow"; innerGlow.Size = UDim2.new(0.6,0,0.6,0); innerGlow.Position = UDim2.new(0.2,0,0.2,0); innerGlow.BackgroundColor3 = Color3.fromRGB(255,50,50); innerGlow.BackgroundTransparency = 0.9; innerGlow.BorderSizePixel = 0; innerGlow.Visible = false
+	local ic = Instance.new("UICorner"); ic.CornerRadius = UDim.new(0,8); ic.Parent = innerGlow; innerGlow.Parent = btnFrame
+	local imageLabel = Instance.new("ImageLabel")
+	imageLabel.Name = "ImageLabel"; imageLabel.Size = UDim2.new(0.6,0,0.6,0); imageLabel.Position = UDim2.new(0.2,0,0.15,0); imageLabel.BackgroundTransparency = 1; imageLabel.Image = imageId; imageLabel.Parent = btnFrame
+	local textLabel = Instance.new("TextLabel")
+	textLabel.Name = "TextLabel"; textLabel.Size = UDim2.new(1,0,0.22,0); textLabel.Position = UDim2.new(0,0,0.78,0); textLabel.BackgroundTransparency = 1; textLabel.TextColor3 = Color3.new(1,1,1); textLabel.TextScaled = true; textLabel.Font = Enum.Font.GothamBold; textLabel.Text = name; textLabel.Parent = btnFrame
+	local btn = Instance.new("TextButton")
+	btn.Name = name .. "Button"; btn.Size = UDim2.new(1,0,1,0); btn.BackgroundTransparency = 1; btn.Text = ""; btn.Parent = btnFrame
+	local state = {
+		frame = btnFrame,
+		glow = glow,
+		innerGlow = innerGlow,
+		imageLabel = imageLabel,
+		textLabel = textLabel,
+		btn = btn,
+		isToggle = isToggle or false,
+		getState = getState or function() return false end,
+		setState = setState or function() end,
+	}
+	table.insert(buttonStates, state)
+	return state
+end
+
+local function updateButtonStates()
+	for _, s in ipairs(buttonStates) do
+		if s.isToggle then
+			local active = s.getState()
+			s.glow.Visible = active
+			s.innerGlow.Visible = active
+			s.frame.BorderColor3 = active and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(80, 80, 100)
+		end
+	end
+end
+
+local function makeDraggable(guiObject)
+	local dragging, dragStart, startPos = false
+	guiObject.InputBegan:Connect(function(input)
+		if shared.settings.buttonsLocked then return end
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPos = guiObject.Position
+		end
+	end)
+	userInputService.InputChanged:Connect(function(input)
+		if shared.settings.buttonsLocked then return end
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			local delta = input.Position - dragStart
+			guiObject.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+	userInputService.InputEnded:Connect(function(input)
+		if dragging then dragging = false end
+	end)
+end
+
+local function CreateQuoteMenu(parent)
+	local menuFrame = Instance.new("Frame")
+	menuFrame.Name = "QuoteMenu"
+	menuFrame.Size = UDim2.new(0, 300, 0, 450)
+	menuFrame.Position = UDim2.new(0.5, -150, 0.5, -225)
+	menuFrame.BackgroundColor3 = Color3.new(0.1, 0.1, 0.15)
+	menuFrame.BackgroundTransparency = 0.1
+	menuFrame.BorderSizePixel = 2
+	menuFrame.BorderColor3 = Color3.fromRGB(80, 80, 100)
+	menuFrame.Visible = false
+	menuFrame.Parent = parent
+	makeDraggable(menuFrame)
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = menuFrame
+
+	local title = Instance.new("TextLabel")
+	title.Text = "📢 QUOTES"
+	title.Size = UDim2.new(1, 0, 0, 40)
+	title.TextColor3 = Color3.new(1, 1, 1)
+	title.TextScaled = true
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.GothamBold
+	title.Parent = menuFrame
+
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Size = UDim2.new(0, 30, 0, 30)
+	closeBtn.Position = UDim2.new(1, -35, 0, 5)
+	closeBtn.Text = "✕"
+	closeBtn.TextColor3 = Color3.new(1, 1, 1)
+	closeBtn.TextScaled = true
+	closeBtn.BackgroundColor3 = Color3.new(0.5, 0.2, 0.2)
+	closeBtn.BackgroundTransparency = 0.3
+	closeBtn.BorderSizePixel = 0
+	closeBtn.Parent = menuFrame
+	local cCorner = Instance.new("UICorner")
+	cCorner.CornerRadius = UDim.new(0, 4)
+	cCorner.Parent = closeBtn
+	closeBtn.MouseButton1Click:Connect(function()
+		menuFrame.Visible = false
+		quoteMenuVisible = false
+	end)
+
+	local scrollFrame = Instance.new("ScrollingFrame")
+	scrollFrame.Size = UDim2.new(1, -20, 1, -50)
+	scrollFrame.Position = UDim2.new(0, 10, 0, 45)
+	scrollFrame.BackgroundTransparency = 1
+	scrollFrame.ScrollBarThickness = 8
+	scrollFrame.ScrollBarImageColor3 = Color3.fromRGB(255, 50, 50)
+	scrollFrame.Parent = menuFrame
+
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 5)
+	layout.Parent = scrollFrame
+
+	for i, displayName in ipairs(randomDisplayNames) do
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(1, 0, 0, 35)
+		btn.Text = displayName
+		btn.TextColor3 = Color3.new(1, 1, 1)
+		btn.TextScaled = true
+		btn.TextXAlignment = Enum.TextXAlignment.Left
+		btn.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+		btn.BackgroundTransparency = 0.3
+		btn.BorderSizePixel = 0
+		btn.Parent = scrollFrame
+		local bCorner = Instance.new("UICorner")
+		bCorner.CornerRadius = UDim.new(0, 4)
+		bCorner.Parent = btn
+
+		btn.MouseEnter:Connect(function()
+			btn.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
+		end)
+		btn.MouseLeave:Connect(function()
+			btn.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+		end)
+
+		btn.MouseButton1Click:Connect(function()
+			local selected = randomMessages[i]
+			if selected then
+				local TextChatService = game:GetService("TextChatService")
+				if TextChatService then
+					pcall(function()
+						TextChatService.TextChannels.RBXGeneral:SendAsync(selected.text)
+					end)
+				end
+				if selected.soundId then
+					local sound = Instance.new("Sound")
+					sound.SoundId = selected.soundId
+					sound.Volume = 1
+					sound.Parent = character and character:FindFirstChild("Head") or workspace
+					sound:Play()
+					sound.Ended:Connect(function() sound:Destroy() end)
+				end
+				menuFrame.Visible = false
+				quoteMenuVisible = false
+			end
+		end)
+	end
+
+	return menuFrame
+end
+
+local function toggleQuoteMenu()
+	if not quoteMenu then
+		local screenGui = player.PlayerGui:FindFirstChild("AnimationHUD")
+		if screenGui then
+			quoteMenu = CreateQuoteMenu(screenGui)
+		end
+	end
+	if quoteMenu then
+		quoteMenuVisible = not quoteMenuVisible
+		quoteMenu.Visible = quoteMenuVisible
+	end
+end
+
+local function createSupeLabel(text, color)
+	if not supeEnabled then return end
+	local screenGui = player.PlayerGui:FindFirstChild("AnimationHUD")
+	if not screenGui then return end
+	local label = Instance.new("TextLabel")
+	label.Name = "SupeLabel"
+	label.Size = UDim2.new(0, 300, 0, 22)
+	label.Position = UDim2.new(1, -310, 0, 10 + #supeLabels * 24)
+	label.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	label.BackgroundTransparency = 0.3
+	label.TextColor3 = color or Color3.new(1, 1, 1)
+	label.Text = text
+	label.TextScaled = true
+	label.Font = Enum.Font.Gotham
+	label.TextXAlignment = Enum.TextXAlignment.Right
+	label.Parent = screenGui
+	table.insert(supeLabels, label)
+	if #supeLabels > MAX_SUPE_MESSAGES then
+		local old = table.remove(supeLabels, 1)
+		if old and old.Parent then old:Destroy() end
+	end
+	task.delay(3, function()
+		if label and label.Parent then
+			for i, lbl in ipairs(supeLabels) do
+				if lbl == label then
+					table.remove(supeLabels, i)
+					break
+				end
+			end
+			label:Destroy()
+			for i, lbl in ipairs(supeLabels) do
+				lbl.Position = UDim2.new(1, -310, 0, 10 + (i - 1) * 24)
+			end
+		end
+	end)
+	for i, lbl in ipairs(supeLabels) do
+		lbl.Position = UDim2.new(1, -310, 0, 10 + (i - 1) * 24)
+	end
+end
+
+local function setupSupeEvents()
+	for _, c in pairs(supeConnections) do c:Disconnect() end
+	supeConnections = {}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= player then
+			local char = plr.Character
+			if char and char:FindFirstChild("Humanoid") then
+				local hum = char:FindFirstChild("Humanoid")
+				local dc = hum.Died:Connect(function()
+					createSupeLabel(plr.Name .. " died", Color3.fromRGB(255,80,80))
+					dc:Disconnect()
+				end)
+				table.insert(supeConnections, dc)
+			end
+		end
+	end
+	table.insert(supeConnections, Players.PlayerAdded:Connect(function(plr)
+		if plr == player then return end
+		createSupeLabel(plr.Name .. " joined", Color3.fromRGB(80,255,80))
+		local cac = plr.CharacterAdded:Connect(function(char)
+			local hum = char:WaitForChild("Humanoid")
+			local dc = hum.Died:Connect(function()
+				createSupeLabel(plr.Name .. " died", Color3.fromRGB(255,80,80))
+				dc:Disconnect()
+			end)
+			table.insert(supeConnections, dc)
+			cac:Disconnect()
+		end)
+		table.insert(supeConnections, cac)
+	end))
+	table.insert(supeConnections, Players.PlayerRemoving:Connect(function(plr)
+		if plr == player then return end
+		createSupeLabel(plr.Name .. " left", Color3.fromRGB(255,200,80))
+	end))
+end
+
+local function toggleSupe()
+	supeEnabled = not supeEnabled
+	if supeEnabled then
+		setupSupeEvents()
+		createSupeLabel("Supe system activated", Color3.fromRGB(100,200,255))
+	else
+		for _, c in pairs(supeConnections) do c:Disconnect() end
+		supeConnections = {}
+		local sg = player.PlayerGui:FindFirstChild("AnimationHUD")
+		if sg then
+			for _, ch in ipairs(sg:GetChildren()) do
+				if ch:IsA("TextLabel") and ch.Name == "SupeLabel" then ch:Destroy() end
+			end
+		end
+		supeLabels = {}
+	end
+	updateButtonStates()
+end
+
+local function toggleXRay()
+	local char, root = character, rootPart
+	if not char or not root then return end
+	local rootPos = root.Position
+	local radius = 1000
+	if not xrayEnabled then
+		xrayEnabled = true
+		xrayAffectedParts = {}
+		for _, part in ipairs(workspace:GetDescendants()) do
+			if part:IsA("BasePart") and part.Parent then
+				local model = part:FindFirstAncestorOfClass("Model")
+				if model and model:FindFirstChild("Humanoid") then continue end
+				if (part.Position - rootPos).Magnitude <= radius then
+					xrayAffectedParts[part] = part.Transparency
+					part.Transparency = 0.7
+				end
+			end
+		end
+	else
+		xrayEnabled = false
+		for part, trans in pairs(xrayAffectedParts) do
+			if part and part.Parent then part.Transparency = trans end
+		end
+		xrayAffectedParts = {}
+	end
+	updateButtonStates()
+end
+
+local function createSettingsMenu(parent)
+	local menuFrame = Instance.new("Frame")
+	menuFrame.Name = "SettingsMenu"
+	menuFrame.Size = UDim2.new(0, 250, 0, 440)
+	menuFrame.Position = UDim2.new(0.5, -125, 0.5, -220)
+	menuFrame.BackgroundColor3 = Color3.new(0.1,0.1,0.15)
+	menuFrame.BackgroundTransparency = 0.1
+	menuFrame.BorderSizePixel = 0
+	menuFrame.Visible = false
+	menuFrame.Parent = parent
+	makeDraggable(menuFrame)
+	local title = Instance.new("TextLabel")
+	title.Text = "⚙️ SETTINGS"
+	title.Size = UDim2.new(1,0,0,40)
+	title.TextColor3 = Color3.new(1,1,1)
+	title.TextScaled = true
+	title.BackgroundTransparency = 1
+	title.Parent = menuFrame
+	local function createOption(parent, text, yPos, getValue, setValue)
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(0.9,0,0,40)
+		btn.Position = UDim2.new(0.05,0,0,yPos)
+		btn.Text = text
+		btn.TextColor3 = Color3.new(1,1,1)
+		btn.TextScaled = true
+		btn.BackgroundColor3 = Color3.new(0.2,0.2,0.3)
+		btn.BackgroundTransparency = 0.3
+		btn.BorderSizePixel = 0
+		btn.Parent = parent
+		local function updateText() btn.Text = text .. ": " .. tostring(getValue()) end
+		updateText()
+		btn.MouseButton1Click:Connect(function() setValue(); updateText() end)
+	end
+	createOption(menuFrame, "🎯 Camera Follow", 50, function() return shared.settings.cameraFollow and "ON" or "OFF" end, function() shared.settings.cameraFollow = not shared.settings.cameraFollow if (shared.flying or shared.floating) and shared.settings.cameraFollow and bodyGyro then bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + camera.CFrame.LookVector) end end)
+	createOption(menuFrame, "⚡ Speed Mode", 100, function() return shared.settings.speedMode end, function() local modes = { "Slow", "Normal", "Fast" } local cur = 1 for i,m in ipairs(modes) do if m == shared.settings.speedMode then cur = i end end shared.settings.speedMode = modes[cur % 3 + 1]; if not shared.floating then updateSpeed() end end)
+	createOption(menuFrame, "🌊 Camera Shake", 150, function() return shared.settings.cameraShake and "ON" or "OFF" end, function() shared.settings.cameraShake = not shared.settings.cameraShake end)
+	createOption(menuFrame, "🔍 Camera Zoom", 200, function() return shared.settings.cameraZoom and "ON" or "OFF" end, function() shared.settings.cameraZoom = not shared.settings.cameraZoom end)
+	createOption(menuFrame, "🔫 Lazer Fling", 250, function() return shared.settings.laserFlingEnabled and "ON" or "OFF" end, function() shared.settings.laserFlingEnabled = not shared.settings.laserFlingEnabled; updateButtonStates() end)
+	createOption(menuFrame, "💡 Laser Idle", 300, function() return shared.settings.laserIdleEnabled and "ON" or "OFF" end, function() shared.settings.laserIdleEnabled = not shared.settings.laserIdleEnabled; if shared.laserActive then shared.updateIdleState() end end)
+	createOption(menuFrame, "📷 Shoulder Camera", 350, function() return shared.settings.shoulderCamera and "ON" or "OFF" end, function() shared.settings.shoulderCamera = not shared.settings.shoulderCamera end)
+	createOption(menuFrame, "🔒 Lock Buttons", 400, function() return shared.settings.buttonsLocked and "ON" or "OFF" end, function() shared.settings.buttonsLocked = not shared.settings.buttonsLocked end)
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Size = UDim2.new(0,30,0,30)
+	closeBtn.Position = UDim2.new(1,-35,0,5)
+	closeBtn.Text = "✕"
+	closeBtn.TextColor3 = Color3.new(1,1,1)
+	closeBtn.TextScaled = true
+	closeBtn.BackgroundColor3 = Color3.new(0.5,0.2,0.2)
+	closeBtn.BackgroundTransparency = 0.3
+	closeBtn.BorderSizePixel = 0
+	closeBtn.Parent = menuFrame
+	closeBtn.MouseButton1Click:Connect(function() menuFrame.Visible = false end)
+	return menuFrame
+end
+
+local function createLaserSettingsMenu(parent)
+	local menuFrame = Instance.new("Frame")
+	menuFrame.Name = "LaserSettingsMenu"
+	menuFrame.Size = UDim2.new(0, 220, 0, 380)
+	menuFrame.Position = UDim2.new(0.5, -110, 0.5, -190)
+	menuFrame.BackgroundColor3 = Color3.new(0.1,0.1,0.15)
+	menuFrame.BackgroundTransparency = 0.1
+	menuFrame.BorderSizePixel = 0
+	menuFrame.Visible = false
+	menuFrame.Parent = parent
+	makeDraggable(menuFrame)
+
+	local title = Instance.new("TextLabel")
+	title.Text = "🔫 LASER SETTINGS"
+	title.Size = UDim2.new(1,0,0,30)
+	title.TextColor3 = Color3.new(1,1,1)
+	title.TextScaled = true
+	title.BackgroundTransparency = 1
+	title.Parent = menuFrame
+
+	local function createControlButton(parent, text, x, y, sizeX, sizeY, callback)
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(0, sizeX or 35, 0, sizeY or 35)
+		btn.Position = UDim2.new(0, x, 0, y)
+		btn.Text = text
+		btn.TextColor3 = Color3.new(1,1,1)
+		btn.TextScaled = true
+		btn.BackgroundColor3 = Color3.new(0.2,0.2,0.3)
+		btn.BackgroundTransparency = 0.3
+		btn.BorderSizePixel = 0
+		btn.Parent = parent
+		btn.MouseButton1Click:Connect(callback)
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 4)
+		corner.Parent = btn
+		return btn
+	end
+
+	local function createValueLabel(parent, text, x, y)
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.new(0, 60, 0, 25)
+		label.Position = UDim2.new(0, x, 0, y)
+		label.Text = text
+		label.TextColor3 = Color3.new(1,1,1)
+		label.TextScaled = true
+		label.BackgroundTransparency = 1
+		label.Parent = parent
+		return label
+	end
+
+	local xLabel = createValueLabel(menuFrame, "X: 0.225", 10, 40)
+	createControlButton(menuFrame, "◄", 80, 40, 30, 30, function()
+		local val = shared.laserSettings.offsetX - 0.025
+		shared.updateLaserSettings("offsetX", val)
+		xLabel.Text = string.format("X: %.3f", shared.laserSettings.offsetX)
+	end)
+	createControlButton(menuFrame, "►", 120, 40, 30, 30, function()
+		local val = shared.laserSettings.offsetX + 0.025
+		shared.updateLaserSettings("offsetX", val)
+		xLabel.Text = string.format("X: %.3f", shared.laserSettings.offsetX)
+	end)
+
+	local yLabel = createValueLabel(menuFrame, "Y: 0.050", 10, 80)
+	createControlButton(menuFrame, "▲", 100, 80, 30, 30, function()
+		local val = shared.laserSettings.offsetY + 0.025
+		shared.updateLaserSettings("offsetY", val)
+		yLabel.Text = string.format("Y: %.3f", shared.laserSettings.offsetY)
+	end)
+	createControlButton(menuFrame, "▼", 100, 115, 30, 30, function()
+		local val = shared.laserSettings.offsetY - 0.025
+		shared.updateLaserSettings("offsetY", val)
+		yLabel.Text = string.format("Y: %.3f", shared.laserSettings.offsetY)
+	end)
+
+		-- CORE THICKNESS
+	local tLabel = createValueLabel(menuFrame, "Core: 1.00", 10, 160)
+	createControlButton(menuFrame, "−", 80, 160, 30, 30, function()
+		local val = shared.laserSettings.thickness - 0.1
+		shared.updateLaserSettings("thickness", val)
+		tLabel.Text = string.format("Core: %.2f", shared.laserSettings.thickness)
+	end)
+	createControlButton(menuFrame, "+", 120, 160, 30, 30, function()
+		local val = shared.laserSettings.thickness + 0.1
+		shared.updateLaserSettings("thickness", val)
+		tLabel.Text = string.format("Core: %.2f", shared.laserSettings.thickness)
+	end)
+
+	-- BRIGHTNESS
+	local bLabel = createValueLabel(menuFrame, "🔥: 1.00", 10, 200)
+	createControlButton(menuFrame, "−", 80, 200, 30, 30, function()
+		local val = shared.laserSettings.brightness - 0.1
+		shared.updateLaserSettings("brightness", val)
+		bLabel.Text = string.format("🔥: %.2f", shared.laserSettings.brightness)
+	end)
+	createControlButton(menuFrame, "+", 120, 200, 30, 30, function()
+		local val = shared.laserSettings.brightness + 0.1
+		shared.updateLaserSettings("brightness", val)
+		bLabel.Text = string.format("🔥: %.2f", shared.laserSettings.brightness)
+	end)
+
+	-- SPACING
+	local sLabel = createValueLabel(menuFrame, "S: 0.225", 10, 240)
+	createControlButton(menuFrame, "−", 80, 240, 30, 30, function()
+		local val = shared.laserSettings.spacing - 0.025
+		shared.updateLaserSettings("spacing", val)
+		sLabel.Text = string.format("S: %.3f", shared.laserSettings.spacing)
+	end)
+	createControlButton(menuFrame, "+", 120, 240, 30, 30, function()
+		local val = shared.laserSettings.spacing + 0.025
+		shared.updateLaserSettings("spacing", val)
+		sLabel.Text = string.format("S: %.3f", shared.laserSettings.spacing)
+	end)
+
+	-- LAZER RENK SEÇENEKLERİ
+	local presetLabel = Instance.new("TextLabel")
+	presetLabel.Size = UDim2.new(1, 0, 0, 20)
+	presetLabel.Position = UDim2.new(0, 0, 0, 275)
+	presetLabel.Text = "🎨 Color Preset"
+	presetLabel.TextColor3 = Color3.new(1,1,1)
+	presetLabel.TextScaled = true
+	presetLabel.BackgroundTransparency = 1
+	presetLabel.Parent = menuFrame
+
+	local classicBtn = Instance.new("TextButton")
+	classicBtn.Size = UDim2.new(0, 85, 0, 30)
+	classicBtn.Position = UDim2.new(0.08, 0, 0, 300)
+	classicBtn.Text = "Classic"
+	classicBtn.TextColor3 = Color3.new(1,1,1)
+	classicBtn.TextScaled = true
+	classicBtn.BackgroundColor3 = Color3.new(0.2,0.2,0.3)
+	classicBtn.BackgroundTransparency = 0.3
+	classicBtn.BorderSizePixel = 0
+	classicBtn.Parent = menuFrame
+	local cCorner = Instance.new("UICorner")
+	cCorner.CornerRadius = UDim.new(0, 4)
+	cCorner.Parent = classicBtn
+
+	local homeBtn = Instance.new("TextButton")
+	homeBtn.Size = UDim2.new(0, 85, 0, 30)
+	homeBtn.Position = UDim2.new(0.5, 5, 0, 300)
+	homeBtn.Text = "Homelander"
+	homeBtn.TextColor3 = Color3.new(1,1,1)
+	homeBtn.TextScaled = true
+	homeBtn.BackgroundColor3 = Color3.new(0.2,0.2,0.3)
+	homeBtn.BackgroundTransparency = 0.3
+	homeBtn.BorderSizePixel = 0
+	homeBtn.Parent = menuFrame
+	local hCorner = Instance.new("UICorner")
+	hCorner.CornerRadius = UDim.new(0, 4)
+	hCorner.Parent = homeBtn
+
+	local function updatePresetButtons()
+		local preset = shared.laserSettings.colorPreset or "Classic"
+		classicBtn.BorderSizePixel = (preset == "Classic") and 2 or 0
+		classicBtn.BorderColor3 = (preset == "Classic") and Color3.fromRGB(255,50,50) or Color3.new(0,0,0)
+		homeBtn.BorderSizePixel = (preset == "Homelander") and 2 or 0
+		homeBtn.BorderColor3 = (preset == "Homelander") and Color3.fromRGB(255,50,50) or Color3.new(0,0,0)
+	end
+
+	classicBtn.MouseButton1Click:Connect(function()
+		shared.laserSettings.colorPreset = "Classic"
+		updatePresetButtons()
+		if shared.laserActive then
+			shared.destroyLaserObjects()
+			local sp = shared.laserSettings.spacing
+			laserLeftEnd = createLaserBeams(Vector3.new(-sp, 0.05, -0.48))
+			laserRightEnd = createLaserBeams(Vector3.new(sp, 0.05, -0.48))
+		end
+	end)
+
+	homeBtn.MouseButton1Click:Connect(function()
+		shared.laserSettings.colorPreset = "Homelander"
+		updatePresetButtons()
+		if shared.laserActive then
+			shared.destroyLaserObjects()
+			local sp = shared.laserSettings.spacing
+			laserLeftEnd = createLaserBeams(Vector3.new(-sp, 0.05, -0.48))
+			laserRightEnd = createLaserBeams(Vector3.new(sp, 0.05, -0.48))
+		end
+	end)
+
+	updatePresetButtons()
+
+	-- KAPATMA BUTONU
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Size = UDim2.new(0, 25, 0, 25)
+	closeBtn.Position = UDim2.new(1, -30, 0, 3)
+	closeBtn.Text = "✕"
+	closeBtn.TextColor3 = Color3.new(1,1,1)
+	closeBtn.TextScaled = true
+	closeBtn.BackgroundColor3 = Color3.new(0.5,0.2,0.2)
+	closeBtn.BackgroundTransparency = 0.3
+	closeBtn.BorderSizePixel = 0
+	closeBtn.Parent = menuFrame
+	closeBtn.MouseButton1Click:Connect(function()
+		menuFrame.Visible = false
+	end)
+	local cCorner2 = Instance.new("UICorner")
+	cCorner2.CornerRadius = UDim.new(0, 4)
+	cCorner2.Parent = closeBtn
+
+	return menuFrame
+end
+local function createGUI()
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "AnimationHUD"
+	screenGui.ResetOnSpawn = false
+	screenGui.Parent = player.PlayerGui
+
+	local homelanderFrame = Instance.new("Frame")
+	homelanderFrame.Name = "HomelanderFrame"
+	homelanderFrame.Size = UDim2.new(0, 55, 0, 55)
+	homelanderFrame.Position = UDim2.new(0, 10, 1, -70)
+	homelanderFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+	homelanderFrame.BackgroundTransparency = 0.2
+	homelanderFrame.BorderSizePixel = 2
+	homelanderFrame.BorderColor3 = Color3.fromRGB(80, 80, 100)
+	homelanderFrame.Parent = screenGui
+	local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 8); corner.Parent = homelanderFrame
+	local homelanderGlow = Instance.new("Frame")
+	homelanderGlow.Name = "Glow"; homelanderGlow.Size = UDim2.new(1,0,1,0); homelanderGlow.BackgroundColor3 = Color3.fromRGB(255,0,0); homelanderGlow.BackgroundTransparency = 0.85; homelanderGlow.BorderSizePixel = 0; homelanderGlow.Visible = false
+	local gc = Instance.new("UICorner"); gc.CornerRadius = UDim.new(0,8); gc.Parent = homelanderGlow; homelanderGlow.Parent = homelanderFrame
+	local homelanderInner = Instance.new("Frame")
+	homelanderInner.Name = "InnerGlow"; homelanderInner.Size = UDim2.new(0.6,0,0.6,0); homelanderInner.Position = UDim2.new(0.2,0,0.2,0); homelanderInner.BackgroundColor3 = Color3.fromRGB(255,50,50); homelanderInner.BackgroundTransparency = 0.9; homelanderInner.BorderSizePixel = 0; homelanderInner.Visible = false
+	local ic = Instance.new("UICorner"); ic.CornerRadius = UDim.new(0,8); ic.Parent = homelanderInner; homelanderInner.Parent = homelanderFrame
+	local homelanderImage = Instance.new("ImageLabel")
+	homelanderImage.Name = "ImageLabel"; homelanderImage.Size = UDim2.new(0.6,0,0.6,0); homelanderImage.Position = UDim2.new(0.2,0,0.15,0); homelanderImage.BackgroundTransparency = 1; homelanderImage.Image = GUI_IMAGES.Homelander; homelanderImage.Parent = homelanderFrame
+	local homelanderText = Instance.new("TextLabel")
+	homelanderText.Name = "TextLabel"; homelanderText.Size = UDim2.new(1,0,0.22,0); homelanderText.Position = UDim2.new(0,0,0.78,0); homelanderText.BackgroundTransparency = 1; homelanderText.TextColor3 = Color3.new(1,1,1); homelanderText.TextScaled = true; homelanderText.Font = Enum.Font.GothamBold; homelanderText.Text = "OFF"; homelanderText.Parent = homelanderFrame
+	local homelanderBtn = Instance.new("TextButton")
+	homelanderBtn.Name = "HomelanderButton"; homelanderBtn.Size = UDim2.new(1,0,1,0); homelanderBtn.BackgroundTransparency = 1; homelanderBtn.Text = ""; homelanderBtn.Parent = homelanderFrame
+	makeDraggable(homelanderFrame)
+
+	local btnContainer = Instance.new("Frame")
+	btnContainer.Name = "ButtonContainer"
+	btnContainer.Size = UDim2.new(0, 550, 0, 130)
+	btnContainer.Position = UDim2.new(1, -560, 1, -135)
+	btnContainer.BackgroundTransparency = 1
+	btnContainer.Visible = false
+	btnContainer.Parent = screenGui
+	makeDraggable(btnContainer)
+
+	local function getLaserState() return shared.laserActive end
+	local function getSupeState() return supeEnabled end
+	local function getXRayState() return xrayEnabled end
+	local function getLandState() return shared.settings.landingEnabled end
+	local function getFlyState() return flying end
+	local function getFloatingState() return floatingActive end
+
+	local row1Y, spacing = 0, 55
+
+	local emoteState = createRoundedButton(btnContainer, "Emote", GUI_IMAGES.Emote, 5, row1Y, 50, 50, false)
+	local flyState = createRoundedButton(btnContainer, "Fly", GUI_IMAGES.Fly, 5 + spacing*1, row1Y, 50, 50, true, getFlyState, function() flying = not flying end)
+	local floatState = createRoundedButton(btnContainer, "Float", GUI_IMAGES.Floating, 5 + spacing*2, row1Y, 50, 50, true, getFloatingState, function() floatingActive = not floatingActive end)
+	local flyIdleState = createRoundedButton(btnContainer, "FIdle", GUI_IMAGES.Fly, 5 + spacing*3, row1Y, 50, 50, false)
+	local flyAnimState = createRoundedButton(btnContainer, "FlyAn", GUI_IMAGES.Fly, 5 + spacing*4, row1Y, 50, 50, false)
+	flyAnimState.textLabel.Text = "V1"
+	local laserState = createRoundedButton(btnContainer, "Laser", GUI_IMAGES.Laser, 5 + spacing*5, row1Y, 50, 50, true, getLaserState)
+	local randomState = createRoundedButton(btnContainer, "Rnd", GUI_IMAGES.Random, 5 + spacing*6, row1Y, 50, 50, false)
+
+	local row2Y = 60
+	local xrayState = createRoundedButton(btnContainer, "X-Ray", GUI_IMAGES.XRay, 5, row2Y, 50, 50, true, getXRayState)
+	local supeState = createRoundedButton(btnContainer, "Supe", GUI_IMAGES.Supe, 5 + spacing*1, row2Y, 50, 50, true, getSupeState)
+	local landState = createRoundedButton(btnContainer, "Land", GUI_IMAGES.Homelander, 5 + spacing*2, row2Y, 50, 50, true, getLandState)
+	landState.textLabel.Text = "Land"
+	local laserSettingsState = createRoundedButton(btnContainer, "LaserSet", GUI_IMAGES.LaserSettings, 5 + spacing*3, row2Y, 50, 50, false)
+	laserSettingsState.textLabel.Text = "⚙️L"
+	local settingsState = createRoundedButton(btnContainer, "Set", GUI_IMAGES.Settings, 5 + spacing*4, row2Y, 50, 50, false)
+
+	local settingsMenu = createSettingsMenu(screenGui)
+	local laserSettingsMenu = createLaserSettingsMenu(screenGui)
+
+	local function updateFlyAnimButton()
+		local labels = { "V1", "V2" }
+		flyAnimState.textLabel.Text = labels[flyAnimationVersion] or "V1"
+	end
+
+	local function toggleHomelander()
+		homelanderActive = not homelanderActive
+		btnContainer.Visible = homelanderActive
+		homelanderText.Text = homelanderActive and "ON" or "OFF"
+		homelanderGlow.Visible = homelanderActive
+		homelanderInner.Visible = homelanderActive
+		homelanderFrame.BorderColor3 = homelanderActive and Color3.fromRGB(255,50,50) or Color3.fromRGB(80,80,100)
+	end
+	homelanderBtn.MouseButton1Click:Connect(toggleHomelander)
+
+	emoteState.btn.MouseButton1Click:Connect(function()
+		local idx = (shared.currentIndices.Emote % #shared.ANIM_IDS.Emote) + 1
+		shared.currentIndices.Emote = idx
+		shared.stopCurrentTrack()
+		shared.playAnimation("Emote", idx)
+	end)
+
+	flyState.btn.MouseButton1Click:Connect(function()
+		if flying then
+			flying = false
+			shared.stopFly()
+		else
+			if floatingActive then
+				floatingActive = false
+				shared.stopFly()
+			end
+			flying = true
+			shared.startFly()
+		end
+		updateButtonStates()
+	end)
+
+	floatState.btn.MouseButton1Click:Connect(function()
+		if floatingActive then
+			floatingActive = false
+			shared.stopFly()
+		else
+			if flying then
+				flying = false
+				shared.stopFly()
+			end
+			floatingActive = true
+			shared.startFloating()
+		end
+		updateButtonStates()
+	end)
+
+	local flyIdleVersions = { "V1","V2","V3","V4","V5","V6","V7","V8","V9","V10" }
+	local flyIdleVersionIndex = 1
+	flyIdleState.btn.MouseButton1Click:Connect(function()
+		flyIdleVersionIndex = flyIdleVersionIndex % #flyIdleVersions + 1
+		shared.currentIndices.FlyIdle = flyIdleVersionIndex
+		if (shared.flying or shared.floating) and shared.currentType == "FlyIdle" then
+			shared.playAnimation("FlyIdle", flyIdleVersionIndex)
+		end
+	end)
+
+	flyAnimState.btn.MouseButton1Click:Connect(function()
+		flyAnimationVersion = flyAnimationVersion % 2 + 1
+		shared.currentIndices.Fly = flyAnimationVersion
+		updateFlyAnimButton()
+		if shared.flying and shared.currentType == "Fly" then
+			shared.playAnimation("Fly", flyAnimationVersion)
+		end
+		updateButtonStates()
+	end)
+
+	laserState.btn.MouseButton1Click:Connect(function()
+		shared.toggleLaser()
+		updateButtonStates()
+	end)
+
+	randomState.btn.MouseButton1Click:Connect(function()
+		toggleQuoteMenu()
+	end)
+
+	xrayState.btn.MouseButton1Click:Connect(function()
+		toggleXRay()
+		updateButtonStates()
+	end)
+
+	supeState.btn.MouseButton1Click:Connect(function()
+		toggleSupe()
+		updateButtonStates()
+	end)
+
+	landState.btn.MouseButton1Click:Connect(function()
+		shared.settings.landingEnabled = not shared.settings.landingEnabled
+		updateButtonStates()
+	end)
+
+	laserSettingsState.btn.MouseButton1Click:Connect(function()
+		if laserSettingsMenu then
+			laserSettingsMenu.Visible = not laserSettingsMenu.Visible
+		end
+	end)
+
+	settingsState.btn.MouseButton1Click:Connect(function()
+		if settingsMenu then
+			settingsMenu.Visible = not settingsMenu.Visible
+		end
+	end)
+
+	updateFlyAnimButton()
+	task.wait(0.1)
+	updateButtonStates()
+
+	return screenGui, btnContainer, settingsMenu, laserSettingsMenu
+end
+
+print("Parça 5 Yüklendi - GUI (Random mesaj menüsü + Lazer renk seçenekleri + Floating + Yeni FlyIdle V10 eklendi)")-- ========== PARÇA 6: KARAKTER YÜKLEME VE ANA DÖNGÜ (DÜZELTİLMİŞ) ==========
+local shared = _G.HomelanderShared
+if not shared then warn("Önceki parçaları çalıştırın!") return end
+
+local xrayEnabled, xrayAffectedParts = false, {}
+local supeEnabled, supeConnections, supeLabels = false, {}, {}
+local flyAnimationVersion = 1
+
+local function resetAll()
+	if shared.flying or shared.floating then
+		shared.flying = false
+		shared.floating = false
+		if bodyVelocity then bodyVelocity:Destroy(); bodyVelocity = nil end
+		if bodyGyro then bodyGyro:Destroy(); bodyGyro = nil end
+	end
+	if shared.laserActive then shared.laserActive = false; if shared.stopLaserSound then shared.stopLaserSound() end end
+	shared.laserCurrentDistance = 0
+	shared.currentTrack = nil; shared.currentType = nil
+	shared.normalSpeedAcceleration = false; shared.normalSpeedCurrent = 40
+	shared.shakeTime, shared.effectIntensity, shared.targetIntensity = 0,0,0
+	shared.zoomProgress, shared.targetZoom = 0,0
+	shared.landingCooldown = false; shared.wasInAir = false; shared.landingPosition = nil; shared.landingShakeTime = 0
+	if shared.originalFOV then camera.FieldOfView = shared.originalFOV; shared.originalFOV = nil end
+	if xrayEnabled then
+		for part, trans in pairs(xrayAffectedParts) do
+			if part and part.Parent then part.Transparency = trans end
+		end
+		xrayAffectedParts = {}; xrayEnabled = false
+	end
+	if supeEnabled then
+		supeEnabled = false
+		for _, c in pairs(supeConnections) do c:Disconnect() end
+		supeConnections = {}
+		local sg = player.PlayerGui:FindFirstChild("AnimationHUD")
+		if sg then
+			for _, ch in ipairs(sg:GetChildren()) do
+				if ch:IsA("TextLabel") and ch.Name == "SupeLabel" then ch:Destroy() end
+			end
+		end
+		supeLabels = {}
+	end
+end
+
+-- ★ DÜZELTİLDİ: Animasyonlar önceden yükleniyor ve priority atanıyor
+local function loadAnimations(char)
+	resetAll()
+	character = char
+	humanoid = character:WaitForChild("Humanoid")
+	animator = humanoid:WaitForChild("Animator")
+	rootPart = character:WaitForChild("HumanoidRootPart")
+	for _, part in ipairs(character:GetDescendants()) do
+		if part:IsA("BasePart") then part.CanCollide = true end
+	end
+	for animType, _ in pairs(shared.tracks) do
+		shared.tracks[animType] = {}
+	end
+	for animType, idList in pairs(shared.ANIM_IDS) do
+		for i, animId in ipairs(idList) do
+			local animObj = Instance.new("Animation")
+			animObj.AnimationId = animId
+			local track = animator:LoadAnimation(animObj)
+			
+			-- ★ Priority ataması
+			if animType == "Emote" then
+				track.Priority = Enum.AnimationPriority.Action4
+			elseif animType == "Landing" then
+				track.Priority = Enum.AnimationPriority.Action4
+			elseif animType == "Fly" or animType == "FlyIdle" or animType == "LaserIdle" then
+				track.Priority = Enum.AnimationPriority.Action3
+			end
+			
+			-- ★ Ön yükleme: animasyonu hazırda beklet
+			track:Play(0)
+			track:Pause()
+			track.TimePosition = 0
+			
+			shared.tracks[animType][i] = track
+		end
+	end
+	shared.currentIndices.Fly = flyAnimationVersion or 1
+	shared.stopCurrentTrack()
+	shared.updateIdleState()
+end
+
+local function onCharacterAdded(char)
+	loadAnimations(char)
+	char.Humanoid.Died:Connect(function() resetAll() end)
+end
+
+if shared.setReloadCallback then shared.setReloadCallback(loadAnimations) end
+
+local lastTime = tick()
+runService.RenderStepped:Connect(function(dt)
+	local now = tick()
+	dt = math.min(now - lastTime, 0.033)
+	lastTime = now
+	if not humanoid or not character or not character.Parent then return end
+	if shared.landingCooldown then
+		shared.updateLaser(dt)
+		shared.updateCamera(dt)
+		return
+	end
+	shared.checkEmoteCancel()
+	shared.updateIdleState()
+	local velocityY = rootPart.AssemblyLinearVelocity.Y
+	if (shared.flying or shared.floating) and shared.wasInAir then
+		local grounded = humanoid.FloorMaterial ~= Enum.Material.Air
+		local rayParams = RaycastParams.new()
+		rayParams.FilterType = Enum.RaycastFilterType.Exclude
+		rayParams.FilterDescendantsInstances = {character}
+		local hit = workspace:Raycast(rootPart.Position, Vector3.new(0, -8, 0), rayParams)
+		
+		if shared.settings.landingEnabled then
+			if grounded or (hit and velocityY < -20) then
+				shared.wasInAir = false
+				if not shared.floating then
+					if not (shared.laserActive and shared.settings.laserFlingEnabled) then
+						shared.performLanding()
+						flying = false
+						shared.flying = false
+						updateButtonStates()
+						return
+					end
+				end
+			end
+		end
+	end
+	local isInAir = humanoid.FloorMaterial == Enum.Material.Air
+	shared.wasInAir = isInAir
+	if (shared.flying or shared.floating) and rootPart and humanoid and not shared.isFlinging then
+		if not shared.floating then
+			shared.accelerateNormalSpeed(dt)
+		end
+		local moveDir = humanoid.MoveDirection
+		if moveDir.Magnitude > 0.05 then
+			if shared.flying and shared.currentType ~= "Fly" then
+				shared.playAnimation("Fly", shared.currentIndices.Fly or 1)
+			end
+			local forward = camera.CFrame.LookVector
+			local flatForward = Vector3.new(forward.X, 0, forward.Z)
+			if flatForward.Magnitude > 0 then
+				flatForward = flatForward.Unit
+			end
+			local right = Vector3.new(camera.CFrame.RightVector.X, 0, camera.CFrame.RightVector.Z)
+			if right.Magnitude > 0 then
+				right = right.Unit
+			end
+			local forwardAmount = moveDir:Dot(flatForward)
+			local rightAmount = moveDir:Dot(right)
+			local velocity = flatForward * (forwardAmount * shared.currentSpeed) +
+				right * (rightAmount * shared.currentSpeed) +
+				Vector3.new(0, forward.Y * forwardAmount * shared.currentSpeed, 0)
+			bodyVelocity.Velocity = velocity
+		else
+			if shared.currentType ~= "FlyIdle" and shared.currentType ~= "LaserIdle" then
+				shared.updateIdleState()
+			end
+			bodyVelocity.Velocity = Vector3.zero
+		end
+		shared.updateSmoothEffects(dt)
+		shared.updateCamera(dt)
+	elseif shared.isFlinging and bodyVelocity then
+		bodyVelocity.Velocity = Vector3.new(0,0,0)
+	else
+		shared.updateCamera(dt)
+	end
+	shared.updateLaser(dt)
+end)
+
+if player.Character then loadAnimations(player.Character) end
+player.CharacterAdded:Connect(onCharacterAdded)
+
+local screenGui, btnContainer, settingsMenu, laserSettingsMenu = createGUI()
+
+local flyAnimFrame = btnContainer and btnContainer:FindFirstChild("FlyAnFrame")
+if flyAnimFrame then
+	local btn = flyAnimFrame:FindFirstChild("FlyAnButton")
+	if btn then
+		btn.MouseButton1Click:Connect(function()
+			shared.currentIndices.Fly = flyAnimationVersion
+			if shared.flying and shared.currentType == "Fly" then
+				shared.playAnimation("Fly", flyAnimationVersion)
+			end
+		end)
+	end
+end
+
+player.CharacterRemoving:Connect(function()
+	shared.stopFly()
+	resetAll()
+	character = nil; humanoid = nil; animator = nil; rootPart = nil
+end)
+
+print("Parça 6 Yüklendi - Karakter yükleme ve ana döngü (Düzeltildi: Ön yükleme, Priority ataması)")
+print("=== HOMELANDER SİSTEMİ TAMAMEN YÜKLENDİ (DÜZELTİLMİŞ) ===")
+
+-- NDS özel
+local pid = game.PlaceId
+if pid ~= 189707 then
+    print("Error not found natural disasters survival game!")
+    return
+end
+local rs = game:GetService("RunService")
+local hb = rs.Heartbeat
+local rsd = rs.RenderStepped
+local lp = game.Players.LocalPlayer
+local z = Vector3.zero
+local function f(c)
+    local r = c:WaitForChild("HumanoidRootPart")
+    if r then
+        local con
+        con = hb:Connect(function()
+            if not r.Parent then
+                con:Disconnect()
+            end
+            local v = r.AssemblyLinearVelocity
+            r.AssemblyLinearVelocity = z
+            rsd:Wait()
+            r.AssemblyLinearVelocity = v
+        end)
+    end
+end
+f(lp.Character)
+lp.CharacterAdded:Connect(f)
