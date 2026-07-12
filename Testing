@@ -45,7 +45,7 @@ _G.HomelanderShared.settings = {
 	shoulderCamera = false,
 	cameraOffset = 0,
 	takeoffCutscene = true,
-	cameraStyle = "Random", -- Random veya seçili cutscene
+	cameraStyle = "Random",
 }
 
 _G.HomelanderShared.laserSettings = {
@@ -399,7 +399,7 @@ local function updateCollision()
 	if rootPart then rootPart.CanCollide = not shared.flying and not shared.floating end
 end
 
--- ===== LETTERBOX FONKSİYONLARI =====
+-- ===== LETTERBOX FONKSİYONLARI (ESKİ HALİ) =====
 local function createLetterbox()
 	if letterboxUpper and letterboxUpper.Parent then return end
 	local gui = Instance.new("ScreenGui")
@@ -579,18 +579,24 @@ local function startFly()
 
 	shared.takeoffPlaying = true
 
+	-- 1. Letterbox aç
 	createLetterbox()
 
+	-- 2. Kamerayı önce 10 stud öne al (Emote öncesi)
 	local frontPos = rootPart.Position + rootPart.CFrame.LookVector * 10 + Vector3.new(0, 1, 0)
 	camera.CFrame = CFrame.lookAt(frontPos, rootPart.Position)
 
+	-- 3. Kamera cutscene'ini BAŞLAT (Emote oynarken de cutscene'de olsun)
 	startCutscene()
 
+	-- 4. Emote 1 oynat (0.75 saniye)
 	playAnimation("Emote", 1)
 	task.wait(0.75)
 
+	-- 5. Fly animasyonu başlat
 	playAnimation("Fly", 1)
 
+	-- 6. BodyVelocity ve BodyGyro oluştur
 	if not bodyVelocity then
 		bodyVelocity = Instance.new("BodyVelocity")
 		bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
@@ -604,16 +610,21 @@ local function startFly()
 		bodyGyro.Parent = rootPart
 	end
 
+	-- 7. BodyGyro'yu yukarı yöne çevir (ANI, TWEEN YOK)
+	bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + Vector3.new(0, 1, 0))
+
+	-- 8. FOV 70 → 85 (0.25 saniye)
 	tweenFOV(70, 85, 0.25)
 
+	-- 9. 3 saniye boyunca kademeli olarak 0'dan 800'e çık
 	local startTime = tick()
-	local duration = 3
+	local rampDuration = 3
 	local startVel = 0
 	local targetVel = 800
 	local rampConnection
 	rampConnection = runService.RenderStepped:Connect(function(dt)
 		local elapsed = tick() - startTime
-		local alpha = math.min(elapsed / duration, 1)
+		local alpha = math.min(elapsed / rampDuration, 1)
 		local smoothAlpha = alpha * alpha * (3 - 2 * alpha)
 		local currentVel = startVel + (targetVel - startVel) * smoothAlpha
 		bodyVelocity.Velocity = Vector3.new(0, currentVel, 0)
@@ -623,12 +634,19 @@ local function startFly()
 		end
 	end)
 
-	task.wait(duration)
+	-- 10. 3 saniye boyunca yüksel (bekle)
+	task.wait(rampDuration)
 
+	-- 11. FOV 85 → 70 (0.25 saniye)
 	tweenFOV(85, 70, 0.25)
+
+	-- 12. Letterbox'ı kaldır
 	removeLetterbox()
+
+	-- 13. Cutscene'i durdur
 	stopCutscene()
 
+	-- 14. Kalkış bitti, normal uçuşa geç
 	shared.takeoffPlaying = false
 	shared.flying = true
 	updateSpeed()
@@ -721,7 +739,7 @@ local function performLanding()
 			end
 		end
 	end
-	shared.currentTrack = nil
+		shared.currentTrack = nil
 	shared.currentType = nil
 	shared.oldWalkSpeed = humanoid.WalkSpeed
 	shared.oldJumpPower = humanoid.JumpPower
@@ -742,7 +760,7 @@ local function performLanding()
 		shared.currentTrack = landingTrack
 		shared.currentType = "Landing"
 	end
-		if landingTrack then
+	if landingTrack then
 		local finished = false
 		local conn = landingTrack.Stopped:Connect(function() finished = true; conn:Disconnect() end)
 		local timeout = tick() + 10
@@ -1268,11 +1286,15 @@ local function CreateCutsceneMenu(parent)
 	return menuFrame
 end
 
+-- ===== TOGGLE CUTSCENE MENU (GÜNCELLENDİ) =====
 local function toggleCutsceneMenu()
 	if not cutsceneMenu then
 		local screenGui = player.PlayerGui:FindFirstChild("AnimationHUD")
 		if screenGui then
 			cutsceneMenu = CreateCutsceneMenu(screenGui)
+		else
+			warn("AnimationHUD bulunamadı! Cutscene menüsü oluşturulamadı.")
+			return
 		end
 	end
 	if cutsceneMenu then
@@ -1434,7 +1456,8 @@ local function CreateQuoteMenu(parent)
 
 		btn.MouseButton1Click:Connect(function()
 			local selected = randomMessages[i]
-			if selected then				local TextChatService = game:GetService("TextChatService")
+			if selected then
+				local TextChatService = game:GetService("TextChatService")
 				if TextChatService then
 					pcall(function()
 						TextChatService.TextChannels.RBXGeneral:SendAsync(selected.text)
