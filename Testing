@@ -1,4 +1,3 @@
-
 -- ========== PARÇA 1: BAŞLANGIÇ, DEĞİŞKENLER VE FLING ALTYAPISI ==========
 local player = game.Players.LocalPlayer
 local runService = game:GetService("RunService")
@@ -45,6 +44,8 @@ _G.HomelanderShared.settings = {
 	laserIdleEnabled = true,
 	shoulderCamera = false,
 	cameraOffset = 0,
+	takeoffCutscene = true,
+	cameraStyle = "Random", -- Random veya seçili cutscene
 }
 
 _G.HomelanderShared.laserSettings = {
@@ -198,6 +199,14 @@ local reloadAnimationsCallback = nil
 local godBubbleGui, godBubbleLabel
 local bubbleCoroutine = nil
 
+-- Letterbox'lar için global değişkenler
+local letterboxUpper, letterboxLower = nil, nil
+local takeoffCutsceneConnection = nil
+local takeoffFOVTween = nil
+local currentCutsceneType = nil
+local cutsceneStartTime = 0
+
+-- LAZER RENK FONKSİYONU
 local function getLaserColors()
 	local preset = shared.laserSettings.colorPreset or "Classic"
 	if preset == "Homelander" then
@@ -390,6 +399,136 @@ local function updateCollision()
 	if rootPart then rootPart.CanCollide = not shared.flying and not shared.floating end
 end
 
+-- ===== LETTERBOX FONKSİYONLARI =====
+local function createLetterbox()
+	if letterboxUpper and letterboxUpper.Parent then return end
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "TakeoffLetterbox"
+	gui.ResetOnSpawn = false
+	gui.Parent = player.PlayerGui
+
+	letterboxUpper = Instance.new("Frame")
+	letterboxUpper.Size = UDim2.new(1, 0, 0, 0)
+	letterboxUpper.Position = UDim2.new(0, 0, 0, 0)
+	letterboxUpper.BackgroundColor3 = Color3.new(0,0,0)
+	letterboxUpper.BackgroundTransparency = 1
+	letterboxUpper.Parent = gui
+
+	letterboxLower = Instance.new("Frame")
+	letterboxLower.Size = UDim2.new(1, 0, 0, 0)
+	letterboxLower.Position = UDim2.new(0, 0, 1, 0)
+	letterboxLower.BackgroundColor3 = Color3.new(0,0,0)
+	letterboxLower.BackgroundTransparency = 1
+	letterboxLower.Parent = gui
+
+	TweenService:Create(letterboxUpper, TweenInfo.new(0.15), {Size = UDim2.new(1, 0, 0, 80), BackgroundTransparency = 0}):Play()
+	TweenService:Create(letterboxLower, TweenInfo.new(0.15), {Size = UDim2.new(1, 0, 0, 80), Position = UDim2.new(0, 0, 1, -80), BackgroundTransparency = 0}):Play()
+end
+
+local function removeLetterbox()
+	if letterboxUpper and letterboxUpper.Parent then
+		TweenService:Create(letterboxUpper, TweenInfo.new(0.15), {BackgroundTransparency = 1}):Play()
+		TweenService:Create(letterboxLower, TweenInfo.new(0.15), {BackgroundTransparency = 1}):Play()
+		task.wait(0.2)
+		if letterboxUpper and letterboxUpper.Parent then
+			letterboxUpper.Parent:Destroy()
+		end
+		letterboxUpper = nil
+		letterboxLower = nil
+	end
+end
+
+-- ===== FOV TWEEN =====
+local function tweenFOV(from, to, duration)
+	if takeoffFOVTween then takeoffFOVTween:Cancel() end
+	local startFOV = from or camera.FieldOfView
+	local targetFOV = to
+	local startTime = tick()
+	takeoffFOVTween = runService.RenderStepped:Connect(function()
+		local elapsed = tick() - startTime
+		local alpha = math.min(elapsed / duration, 1)
+		local current = startFOV + (targetFOV - startFOV) * alpha
+		camera.FieldOfView = current
+		if alpha >= 1 then
+			takeoffFOVTween:Disconnect()
+			takeoffFOVTween = nil
+		end
+	end)
+end
+
+-- ===== CUTSCENE FONKSİYONLARI =====
+local function applyCutscene(dt)
+	if not rootPart or not camera then return end
+	local pos = rootPart.Position
+	local look = rootPart.CFrame.LookVector
+	local up = Vector3.new(0,1,0)
+	local right = rootPart.CFrame.RightVector
+
+	if currentCutsceneType == "Front" then
+		local offset = pos + look * 9 + Vector3.new(0, 1, 0)
+		camera.CFrame = CFrame.lookAt(offset, pos)
+	elseif currentCutsceneType == "Overhead" then
+		local offset = pos + Vector3.new(0, 10, 0)
+		camera.CFrame = CFrame.lookAt(offset, pos)
+	elseif currentCutsceneType == "Right" then
+		local offset = pos + (-look + right) * 45 + Vector3.new(0, 3, 0)
+		camera.CFrame = CFrame.lookAt(offset, pos)
+	elseif currentCutsceneType == "Rear" then
+		local offset = pos - look * 12 + Vector3.new(0, 2, 0)
+		camera.CFrame = CFrame.lookAt(offset, pos)
+	elseif currentCutsceneType == "Orbit" then
+		local elapsed = tick() - cutsceneStartTime
+		local angle = math.rad(elapsed * 30)
+		local radius = 12
+		local offset = pos + Vector3.new(math.sin(angle) * radius, 2, math.cos(angle) * radius)
+		camera.CFrame = CFrame.lookAt(offset, pos)
+	elseif currentCutsceneType == "RearToFace" then
+		local elapsed = tick() - cutsceneStartTime
+		local totalDuration = 3
+		local half = totalDuration / 2
+		if elapsed < half then
+			local offset = pos - look * 10 + Vector3.new(0, 2, 0)
+			camera.CFrame = CFrame.lookAt(offset, pos)
+		else
+			local offset = pos + look * 1.5 + Vector3.new(0, 1.5, 0)
+			camera.CFrame = CFrame.lookAt(offset, pos)
+		end
+	else
+		local offset = pos + look * 9 + Vector3.new(0, 1, 0)
+		camera.CFrame = CFrame.lookAt(offset, pos)
+	end
+end
+
+local function startCutscene()
+	if takeoffCutsceneConnection then takeoffCutsceneConnection:Disconnect() end
+	
+	local style = shared.settings.cameraStyle or "Random"
+	if style == "Random" then
+		local scenes = {"Front", "Overhead", "Right", "Rear", "Orbit", "RearToFace"}
+		currentCutsceneType = scenes[math.random(1, #scenes)]
+	else
+		currentCutsceneType = style
+	end
+	
+	cutsceneStartTime = tick()
+	takeoffCutsceneConnection = runService.RenderStepped:Connect(function(dt)
+		if not shared.takeoffPlaying then
+			takeoffCutsceneConnection:Disconnect()
+			takeoffCutsceneConnection = nil
+			return
+		end
+		applyCutscene(dt)
+	end)
+end
+
+local function stopCutscene()
+	if takeoffCutsceneConnection then
+		takeoffCutsceneConnection:Disconnect()
+		takeoffCutsceneConnection = nil
+	end
+end
+
+-- ===== START FLY (SİNEMATİK TAKEOFF) =====
 local function startFly()
 	if shared.flying then return end
 	if not humanoid or not rootPart then return end
@@ -416,10 +555,39 @@ local function startFly()
 		return
 	end
 
+	if shared.settings.takeoffCutscene == false then
+		shared.flying = true
+		updateSpeed()
+		updateCollision()
+		bodyVelocity = Instance.new("BodyVelocity")
+		bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+		bodyVelocity.Velocity = Vector3.zero
+		bodyVelocity.Parent = rootPart
+		bodyGyro = Instance.new("BodyGyro")
+		bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+		bodyGyro.P, bodyGyro.D = 100000, 1000
+		bodyGyro.Parent = rootPart
+		if shared.settings.cameraFollow then
+			local look, up = camera.CFrame.LookVector, camera.CFrame.UpVector
+			bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + look, up)
+		end
+		local moving = humanoid.MoveDirection.Magnitude > 0.1
+		if moving then playAnimation("Fly", shared.currentIndices.Fly)
+		else playAnimation("FlyIdle", shared.currentIndices.FlyIdle) end
+		return
+	end
+
 	shared.takeoffPlaying = true
 
-	playAnimation("Emote", 2)
-	task.wait(0.5)
+	createLetterbox()
+
+	local frontPos = rootPart.Position + rootPart.CFrame.LookVector * 10 + Vector3.new(0, 1, 0)
+	camera.CFrame = CFrame.lookAt(frontPos, rootPart.Position)
+
+	startCutscene()
+
+	playAnimation("Emote", 1)
+	task.wait(0.75)
 
 	playAnimation("Fly", 1)
 
@@ -436,46 +604,43 @@ local function startFly()
 		bodyGyro.Parent = rootPart
 	end
 
-	local startCFrame = bodyGyro.CFrame
-	local targetCFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + Vector3.new(0, 1, 0))
-	local duration = 0.25
+	tweenFOV(70, 85, 0.25)
+
 	local startTime = tick()
-	local con
-	con = runService.RenderStepped:Connect(function()
+	local duration = 3
+	local startVel = 0
+	local targetVel = 800
+	local rampConnection
+	rampConnection = runService.RenderStepped:Connect(function(dt)
 		local elapsed = tick() - startTime
 		local alpha = math.min(elapsed / duration, 1)
-		local currentCF = startCFrame:Lerp(targetCFrame, alpha)
-		bodyGyro.CFrame = currentCF
+		local smoothAlpha = alpha * alpha * (3 - 2 * alpha)
+		local currentVel = startVel + (targetVel - startVel) * smoothAlpha
+		bodyVelocity.Velocity = Vector3.new(0, currentVel, 0)
 		if alpha >= 1 then
-			con:Disconnect()
+			rampConnection:Disconnect()
+			bodyVelocity.Velocity = Vector3.new(0, targetVel, 0)
 		end
 	end)
 
-	bodyVelocity.Velocity = Vector3.new(0, 200, 0)
-	task.wait(1)
+	task.wait(duration)
 
-	local startCFrame2 = bodyGyro.CFrame
-	local look, up = camera.CFrame.LookVector, camera.CFrame.UpVector
-	local targetCFrame2 = CFrame.lookAt(rootPart.Position, rootPart.Position + look, up)
-	local startTime2 = tick()
-	local con2
-	con2 = runService.RenderStepped:Connect(function()
-		local elapsed = tick() - startTime2
-		local alpha = math.min(elapsed / duration, 1)
-		local currentCF = startCFrame2:Lerp(targetCFrame2, alpha)
-		bodyGyro.CFrame = currentCF
-		if alpha >= 1 then
-			con2:Disconnect()
-		end
-	end)
+	tweenFOV(85, 70, 0.25)
+	removeLetterbox()
+	stopCutscene()
 
 	shared.takeoffPlaying = false
 	shared.flying = true
 	updateSpeed()
 	updateCollision()
 	bodyVelocity.Velocity = Vector3.zero
+	if shared.settings.cameraFollow then
+		local look, up = camera.CFrame.LookVector, camera.CFrame.UpVector
+		bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + look, up)
+	end
 end
 
+-- ===== FLOATING, LANDING, LASER BEAM, DESTROY =====
 local function startFloating()
 	if shared.floating then return end
 	if not shared.tracks.FlyIdle[1] and reloadAnimationsCallback and character then
@@ -577,7 +742,7 @@ local function performLanding()
 		shared.currentTrack = landingTrack
 		shared.currentType = "Landing"
 	end
-	if landingTrack then
+		if landingTrack then
 		local finished = false
 		local conn = landingTrack.Stopped:Connect(function() finished = true; conn:Disconnect() end)
 		local timeout = tick() + 10
@@ -603,6 +768,7 @@ local function performLanding()
 	updateSpeed()
 end
 
+-- ===== LAZER BEAM FONKSİYONLARI =====
 local function createLaserBeams(offset)
 	local head = character and character:FindFirstChild("Head")
 	if not head then return nil end
@@ -662,6 +828,7 @@ local function destroyLaserObjects()
 	end
 end
 
+-- ===== EXPORT =====
 shared.stopFly = stopFly
 shared.startFly = startFly
 shared.startFloating = startFloating
@@ -994,6 +1161,125 @@ local flyAnimationVersion = 1
 
 local quoteMenu = nil
 local quoteMenuVisible = false
+local cutsceneMenu = nil
+local cutsceneMenuVisible = false
+
+-- ===== CUTSCENE MENÜSÜ =====
+local function CreateCutsceneMenu(parent)
+	local menuFrame = Instance.new("Frame")
+	menuFrame.Name = "CutsceneMenu"
+	menuFrame.Size = UDim2.new(0, 280, 0, 380)
+	menuFrame.Position = UDim2.new(0.5, -140, 0.5, -190)
+	menuFrame.BackgroundColor3 = Color3.new(0.1, 0.1, 0.15)
+	menuFrame.BackgroundTransparency = 0.1
+	menuFrame.BorderSizePixel = 2
+	menuFrame.BorderColor3 = Color3.fromRGB(80, 80, 100)
+	menuFrame.Visible = false
+	menuFrame.Parent = parent
+	makeDraggable(menuFrame)
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = menuFrame
+
+	local title = Instance.new("TextLabel")
+	title.Text = "🎬 CUTSCENE STYLE"
+	title.Size = UDim2.new(1, 0, 0, 40)
+	title.TextColor3 = Color3.new(1, 1, 1)
+	title.TextScaled = true
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.GothamBold
+	title.Parent = menuFrame
+
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Size = UDim2.new(0, 30, 0, 30)
+	closeBtn.Position = UDim2.new(1, -35, 0, 5)
+	closeBtn.Text = "✕"
+	closeBtn.TextColor3 = Color3.new(1, 1, 1)
+	closeBtn.TextScaled = true
+	closeBtn.BackgroundColor3 = Color3.new(0.5, 0.2, 0.2)
+	closeBtn.BackgroundTransparency = 0.3
+	closeBtn.BorderSizePixel = 0
+	closeBtn.Parent = menuFrame
+	local cCorner = Instance.new("UICorner")
+	cCorner.CornerRadius = UDim.new(0, 4)
+	cCorner.Parent = closeBtn
+	closeBtn.MouseButton1Click:Connect(function()
+		menuFrame.Visible = false
+		cutsceneMenuVisible = false
+	end)
+
+	local scrollFrame = Instance.new("ScrollingFrame")
+	scrollFrame.Size = UDim2.new(1, -20, 1, -50)
+	scrollFrame.Position = UDim2.new(0, 10, 0, 45)
+	scrollFrame.BackgroundTransparency = 1
+	scrollFrame.ScrollBarThickness = 8
+	scrollFrame.ScrollBarImageColor3 = Color3.fromRGB(255, 50, 50)
+	scrollFrame.Parent = menuFrame
+
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 5)
+	layout.Parent = scrollFrame
+
+	local cutsceneNames = {
+		"📌 Random",
+		"🎯 Front",
+		"⬆️ Overhead",
+		"➡️ Right",
+		"🔙 Rear",
+		"🔄 Orbit",
+		"🔄 RearToFace"
+	}
+	local cutsceneValues = {
+		"Random", "Front", "Overhead", "Right", "Rear", "Orbit", "RearToFace"
+	}
+
+	for i, displayName in ipairs(cutsceneNames) do
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(1, 0, 0, 40)
+		btn.Text = displayName
+		btn.TextColor3 = Color3.new(1, 1, 1)
+		btn.TextScaled = true
+		btn.TextXAlignment = Enum.TextXAlignment.Left
+		btn.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+		btn.BackgroundTransparency = 0.3
+		btn.BorderSizePixel = 0
+		btn.Parent = scrollFrame
+		local bCorner = Instance.new("UICorner")
+		bCorner.CornerRadius = UDim.new(0, 4)
+		bCorner.Parent = btn
+
+		btn.MouseEnter:Connect(function()
+			btn.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
+		end)
+		btn.MouseLeave:Connect(function()
+			btn.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+		end)
+
+		btn.MouseButton1Click:Connect(function()
+			local selected = cutsceneValues[i]
+			shared.settings.cameraStyle = selected
+			menuFrame.Visible = false
+			cutsceneMenuVisible = false
+		end)
+	end
+
+	return menuFrame
+end
+
+local function toggleCutsceneMenu()
+	if not cutsceneMenu then
+		local screenGui = player.PlayerGui:FindFirstChild("AnimationHUD")
+		if screenGui then
+			cutsceneMenu = CreateCutsceneMenu(screenGui)
+		end
+	end
+	if cutsceneMenu then
+		cutsceneMenuVisible = not cutsceneMenuVisible
+		cutsceneMenu.Visible = cutsceneMenuVisible
+	end
+end
 
 local function createRoundedButton(parent, name, imageId, posX, posY, sizeX, sizeY, isToggle, getState, setState)
 	local btnFrame = Instance.new("Frame")
@@ -1066,6 +1352,7 @@ local function makeDraggable(guiObject)
 	end)
 end
 
+-- ===== QUOTE MENÜSÜ =====
 local function CreateQuoteMenu(parent)
 	local menuFrame = Instance.new("Frame")
 	menuFrame.Name = "QuoteMenu"
@@ -1147,8 +1434,7 @@ local function CreateQuoteMenu(parent)
 
 		btn.MouseButton1Click:Connect(function()
 			local selected = randomMessages[i]
-			if selected then
-				local TextChatService = game:GetService("TextChatService")
+			if selected then				local TextChatService = game:GetService("TextChatService")
 				if TextChatService then
 					pcall(function()
 						TextChatService.TextChannels.RBXGeneral:SendAsync(selected.text)
@@ -1310,14 +1596,15 @@ end
 local function createSettingsMenu(parent)
 	local menuFrame = Instance.new("Frame")
 	menuFrame.Name = "SettingsMenu"
-	menuFrame.Size = UDim2.new(0, 250, 0, 440)
-	menuFrame.Position = UDim2.new(0.5, -125, 0.5, -220)
+	menuFrame.Size = UDim2.new(0, 250, 0, 550)
+	menuFrame.Position = UDim2.new(0.5, -125, 0.5, -275)
 	menuFrame.BackgroundColor3 = Color3.new(0.1,0.1,0.15)
 	menuFrame.BackgroundTransparency = 0.1
 	menuFrame.BorderSizePixel = 0
 	menuFrame.Visible = false
 	menuFrame.Parent = parent
 	makeDraggable(menuFrame)
+	
 	local title = Instance.new("TextLabel")
 	title.Text = "⚙️ SETTINGS"
 	title.Size = UDim2.new(1,0,0,40)
@@ -1325,6 +1612,7 @@ local function createSettingsMenu(parent)
 	title.TextScaled = true
 	title.BackgroundTransparency = 1
 	title.Parent = menuFrame
+	
 	local function createOption(parent, text, yPos, getValue, setValue)
 		local btn = Instance.new("TextButton")
 		btn.Size = UDim2.new(0.9,0,0,40)
@@ -1340,6 +1628,7 @@ local function createSettingsMenu(parent)
 		updateText()
 		btn.MouseButton1Click:Connect(function() setValue(); updateText() end)
 	end
+	
 	createOption(menuFrame, "🎯 Camera Follow", 50, function() return shared.settings.cameraFollow and "ON" or "OFF" end, function() shared.settings.cameraFollow = not shared.settings.cameraFollow if (shared.flying or shared.floating) and shared.settings.cameraFollow and bodyGyro then bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + camera.CFrame.LookVector) end end)
 	createOption(menuFrame, "⚡ Speed Mode", 100, function() return shared.settings.speedMode end, function() local modes = { "Slow", "Normal", "Fast" } local cur = 1 for i,m in ipairs(modes) do if m == shared.settings.speedMode then cur = i end end shared.settings.speedMode = modes[cur % 3 + 1]; if not shared.floating then updateSpeed() end end)
 	createOption(menuFrame, "🌊 Camera Shake", 150, function() return shared.settings.cameraShake and "ON" or "OFF" end, function() shared.settings.cameraShake = not shared.settings.cameraShake end)
@@ -1348,6 +1637,8 @@ local function createSettingsMenu(parent)
 	createOption(menuFrame, "💡 Laser Idle", 300, function() return shared.settings.laserIdleEnabled and "ON" or "OFF" end, function() shared.settings.laserIdleEnabled = not shared.settings.laserIdleEnabled; if shared.laserActive then shared.updateIdleState() end end)
 	createOption(menuFrame, "📷 Shoulder Camera", 350, function() return shared.settings.shoulderCamera and "ON" or "OFF" end, function() shared.settings.shoulderCamera = not shared.settings.shoulderCamera end)
 	createOption(menuFrame, "🔒 Lock Buttons", 400, function() return shared.settings.buttonsLocked and "ON" or "OFF" end, function() shared.settings.buttonsLocked = not shared.settings.buttonsLocked end)
+	createOption(menuFrame, "🎬 Takeoff Cutscene", 450, function() return shared.settings.takeoffCutscene and "ON" or "OFF" end, function() shared.settings.takeoffCutscene = not shared.settings.takeoffCutscene end)
+	
 	local closeBtn = Instance.new("TextButton")
 	closeBtn.Size = UDim2.new(0,30,0,30)
 	closeBtn.Position = UDim2.new(1,-35,0,5)
@@ -1359,6 +1650,7 @@ local function createSettingsMenu(parent)
 	closeBtn.BorderSizePixel = 0
 	closeBtn.Parent = menuFrame
 	closeBtn.MouseButton1Click:Connect(function() menuFrame.Visible = false end)
+	
 	return menuFrame
 end
 
@@ -1436,7 +1728,7 @@ local function createLaserSettingsMenu(parent)
 		yLabel.Text = string.format("Y: %.3f", shared.laserSettings.offsetY)
 	end)
 
-		local tLabel = createValueLabel(menuFrame, "Core: 1.00", 10, 160)
+	local tLabel = createValueLabel(menuFrame, "Core: 1.00", 10, 160)
 	createControlButton(menuFrame, "−", 80, 160, 30, 30, function()
 		local val = shared.laserSettings.thickness - 0.1
 		shared.updateLaserSettings("thickness", val)
@@ -1583,6 +1875,7 @@ local function createLaserSettingsMenu(parent)
 
 	return menuFrame
 end
+
 local function createGUI()
 	local screenGui = Instance.new("ScreenGui")
 	screenGui.Name = "AnimationHUD"
@@ -1615,8 +1908,8 @@ local function createGUI()
 
 	local btnContainer = Instance.new("Frame")
 	btnContainer.Name = "ButtonContainer"
-	btnContainer.Size = UDim2.new(0, 550, 0, 130)
-	btnContainer.Position = UDim2.new(1, -560, 1, -135)
+	btnContainer.Size = UDim2.new(0, 600, 0, 130)
+	btnContainer.Position = UDim2.new(1, -610, 1, -135)
 	btnContainer.BackgroundTransparency = 1
 	btnContainer.Visible = false
 	btnContainer.Parent = screenGui
@@ -1639,6 +1932,8 @@ local function createGUI()
 	flyAnimState.textLabel.Text = "V1"
 	local laserState = createRoundedButton(btnContainer, "Laser", GUI_IMAGES.Laser, 5 + spacing*5, row1Y, 50, 50, true, getLaserState)
 	local randomState = createRoundedButton(btnContainer, "Rnd", GUI_IMAGES.Random, 5 + spacing*6, row1Y, 50, 50, false)
+	local cutsceneState = createRoundedButton(btnContainer, "Cut", GUI_IMAGES.Settings, 5 + spacing*7, row1Y, 50, 50, false)
+	cutsceneState.textLabel.Text = "🎬"
 
 	local row2Y = 60
 	local xrayState = createRoundedButton(btnContainer, "X-Ray", GUI_IMAGES.XRay, 5, row2Y, 50, 50, true, getXRayState)
@@ -1731,6 +2026,10 @@ local function createGUI()
 
 	randomState.btn.MouseButton1Click:Connect(function()
 		toggleQuoteMenu()
+	end)
+
+	cutsceneState.btn.MouseButton1Click:Connect(function()
+		toggleCutsceneMenu()
 	end)
 
 	xrayState.btn.MouseButton1Click:Connect(function()
