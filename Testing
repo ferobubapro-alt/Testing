@@ -1,4 +1,4 @@
--- ========== PARÇA 1: BAŞLANGIÇ, DEĞİŞKENLER VE FLING ALTYAPISI ==========
+-- ========== PARÇA 1: BAŞLANGIÇ, DE�İŞKENLER VE FLING ALTYAPISI ==========
 local player = game.Players.LocalPlayer
 local runService = game:GetService("RunService")
 local userInputService = game:GetService("UserInputService")
@@ -22,7 +22,7 @@ local ANIM_IDS = {
 		"rbxassetid://91265501614230",
 		"rbxassetid://107817714498111",
 		"rbxassetid://75136785617617",
-		"rbxassetid://88328893915688",
+		"rbxassetid://88328893915688",   -- <-- YENİ EKLENDİ
 	},
 	Emote = {
 		"rbxassetid://114083419135192",
@@ -67,7 +67,6 @@ _G.HomelanderShared.currentTrack = nil
 _G.HomelanderShared.currentType = nil
 _G.HomelanderShared.currentIndices = { Fly = 1, FlyIdle = 1, Emote = 1, Landing = 1, LaserIdle = 1 }
 _G.HomelanderShared.CROSSFADE_TIME = 0.7
-_G.HomelanderShared.FLY_CROSSFADE_TIME = 0.3  -- <-- Fly animasyonları için özel crossfade
 _G.HomelanderShared.tracks = { Fly = {}, FlyIdle = {}, Emote = {}, Landing = {}, LaserIdle = {} }
 
 _G.HomelanderShared.landingCooldown = false
@@ -95,7 +94,7 @@ _G.HomelanderShared.clientVisualCFrame = CFrame.new()
 getgenv().OldPos = nil
 getgenv().FPDH = workspace.FallenPartsDestroyHeight
 
-print("Parça 1 Yüklendi - Değişkenler ve ayarlar (Fly crossfade 0.3 eklendi)")-- ========== PARÇA 2: FLING MOTORU ==========
+print("Parça 1 Yüklendi - Değişkenler ve ayarlar (Yeni FlyIdle eklendi)")-- ========== PARÇA 2: FLING MOTORU ==========
 function _G.HomelanderShared.SkidFling(TargetPlayer)
     local Character = player.Character
     local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
@@ -239,15 +238,17 @@ local function spawnGroundBlocks(position)
 	end
 end
 
+-- ===== GÜNCELLENEN stopCurrentTrack (Fly için crossfade 0.3) =====
 local function stopCurrentTrack()
 	if shared.currentTrack then
-		shared.currentTrack:Stop(shared.CROSSFADE_TIME)
+		local crossfade = (shared.currentType == "Fly") and 0.3 or shared.CROSSFADE_TIME
+		shared.currentTrack:Stop(crossfade)
 		shared.currentTrack = nil
 	end
 	shared.currentType = nil
 end
 
--- ===== GÜNCELLENEN playAnimation (Fly crossfade 0.3, aynı track korunur) =====
+-- ===== GÜNCELLENEN playAnimation (Fly için crossfade 0.3) =====
 local function playAnimation(animType, index)
 	if not animator then return end
 	local newTrack = shared.tracks[animType][index]
@@ -258,17 +259,18 @@ local function playAnimation(animType, index)
 			if not newTrack then return end
 		else return end
 	end
-	-- Aynı track ise hiçbir şey yapma (TimePosition korunur)
-	if shared.currentTrack == newTrack and newTrack.IsPlaying then
-		return
+	if shared.currentTrack == newTrack and newTrack.IsPlaying then return end
+	
+	local fadeTime = shared.CROSSFADE_TIME
+	if animType == "Fly" or shared.currentType == "Fly" then
+		fadeTime = 0.3
 	end
-	-- Farklı track ise durdur ve yeni track'i oynat
+	
 	if shared.currentTrack then
-		shared.currentTrack:Stop(shared.CROSSFADE_TIME)
+		shared.currentTrack:Stop(fadeTime)
 	end
-	-- Fly animasyonları için crossfade 0.3, diğerleri 0.7
-	local crossfade = (animType == "Fly") and shared.FLY_CROSSFADE_TIME or shared.CROSSFADE_TIME
-	newTrack:Play(crossfade)
+	
+	newTrack:Play(fadeTime)
 	shared.currentTrack = newTrack
 	shared.currentType = animType
 	shared.currentIndices[animType] = index
@@ -468,7 +470,7 @@ local function stopFly(noCrossfade)
 	updateIdleState()
 end
 
--- ===== LANDING KONTROLÜ + 1.5x HIZ =====
+-- ===== GÜNCELLENEN performLanding (Animasyon hızı 1.5x) =====
 local function performLanding()
 	if shared.laserActive and shared.settings.laserFlingEnabled then
 		return
@@ -519,8 +521,8 @@ local function performLanding()
 	if shared.tracks.Landing and shared.tracks.Landing[1] then
 		landingTrack = shared.tracks.Landing[1]
 		landingTrack:Play(0)
+		landingTrack:AdjustSpeed(1.5)  -- <-- 1.5x HIZ
 		landingTrack.Priority = Enum.AnimationPriority.Action4
-		landingTrack.Speed = 1.5  -- <-- 1.5x HIZ
 		shared.currentTrack = landingTrack
 		shared.currentType = "Landing"
 	end
@@ -609,7 +611,7 @@ local function destroyLaserObjects()
 	end
 end
 
-print("Parça 3 Yüklendi - Fly crossfade 0.3, Landing 1.5x, FlyIdle TimePosition korunur")-- ========== PARÇA 4: LAZER SİSTEMİ, GOD DAMN IT! BUBBLE, VIGNETTE VE GÜÇLÜ SÜREKLİ SHAKE ==========
+print("Parça 3 Yüklendi - Animasyon ve uçuş temel fonksiyonları (Fly crossfade:0.3, Landing hız:1.5x)")-- ========== PARÇA 4: LAZER SİSTEMİ, GOD DAMN IT! BUBBLE, VIGNETTE VE GÜÇLÜ SÜREKLİ SHAKE ==========
 local shared = _G.HomelanderShared
 if not shared then warn("Parça 1-3'ü çalıştırın!") return end
 
@@ -708,8 +710,7 @@ local function StartLaserVignette()
 	vignetteImage.BackgroundTransparency = 1
 	vignetteImage.Image = "rbxassetid://15629026059"
 	vignetteImage.ImageColor3 = Color3.fromRGB(255, 0, 0)
-	vignetteImage.ImageTransparency = 0.35
-	vignetteImage.Parent = vignetteGui
+	vignetteImage.ImageTransparency = 0.35	vignetteImage.Parent = vignetteGui
 
 	vignetteTween = task.spawn(function()
 		while shared.laserActive and vignetteImage do
@@ -1381,7 +1382,7 @@ local function createLaserSettingsMenu(parent)
 		xLabel.Text = string.format("X: %.3f", shared.laserSettings.offsetX)
 	end)
 
-		local yLabel = createValueLabel(menuFrame, "Y: 0.050", 10, 80)
+	local yLabel = createValueLabel(menuFrame, "Y: 0.050", 10, 80)
 	createControlButton(menuFrame, "▲", 100, 80, 30, 30, function()
 		local val = shared.laserSettings.offsetY + 0.025
 		shared.updateLaserSettings("offsetY", val)
@@ -1390,7 +1391,7 @@ local function createLaserSettingsMenu(parent)
 	createControlButton(menuFrame, "▼", 100, 115, 30, 30, function()
 		local val = shared.laserSettings.offsetY - 0.025
 		shared.updateLaserSettings("offsetY", val)
-		yLabel.Text = string.format("Y: %.3f", shared.laserSettings.offsetY)
+				yLabel.Text = string.format("Y: %.3f", shared.laserSettings.offsetY)
 	end)
 
 	local tLabel = createValueLabel(menuFrame, "Core: 1.00", 10, 160)
@@ -1876,7 +1877,7 @@ player.CharacterRemoving:Connect(function()
 end)
 
 print("Parça 6 Yüklendi - Karakter yükleme ve ana döngü (Landing lazer kontrolü eklendi)")
-print("=== HOMELANDER SİSTEMİ TAMAMEN YÜKLENDİ (Fly crossfade 0.3, Landing 1.5x, FlyIdle koruma) ===")
+print("=== HOMELANDER SİSTEMİ TAMAMEN YÜKLENDİ (Lazer renk seçenekleri + Floating + Yeni FlyIdle V10 + Landing lazer kontrolü) ===")
 
 -- NDS özel
 local pid = game.PlaceId
