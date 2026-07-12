@@ -43,7 +43,6 @@ _G.HomelanderShared.settings = {
 	laserFlingEnabled = true,
 	laserIdleEnabled = true,
 	shoulderCamera = false,
-	cameraOffsetX = 0,
 }
 
 _G.HomelanderShared.laserSettings = {
@@ -53,6 +52,7 @@ _G.HomelanderShared.laserSettings = {
 	brightness = 1,
 	spacing = 0.225,
 	colorPreset = "Classic",
+	cameraOffsetX = 0, -- YENİ
 }
 
 local speedValues = { Slow = 90, Normal = 90, Fast = 450 }
@@ -95,7 +95,9 @@ _G.HomelanderShared.clientVisualCFrame = CFrame.new()
 getgenv().OldPos = nil
 getgenv().FPDH = workspace.FallenPartsDestroyHeight
 
-print("Parça 1 Yüklendi - Değişkenler ve ayarlar")-- ========== PARÇA 2: FLING MOTORU ==========
+print("Parça 1 Yüklendi - Değişkenler ve ayarlar (Camera Offset eklendi)")
+
+-- ========== PARÇA 2: FLING MOTORU ==========
 function _G.HomelanderShared.SkidFling(TargetPlayer)
     local Character = player.Character
     local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
@@ -178,7 +180,9 @@ runService.RenderStepped:Connect(function()
     end
 end)
 
-print("Parça 2 Yüklendi - Fling motoru")-- ========== PARÇA 3: ANİMASYON, UÇUŞ, KAMERA, LANDING ==========
+print("Parça 2 Yüklendi - Fling motoru")
+
+-- ========== PARÇA 3: ANİMASYON, UÇUŞ, KAMERA, LANDING (BÖLÜM 1) ==========
 local shared = _G.HomelanderShared
 if not shared then warn("Parça 1'i çalıştırın!") return end
 
@@ -372,7 +376,8 @@ local function updateCamera(dt)
 		shared.shakeTime = 0
 	end
 	if shared.settings.shoulderCamera then
-		local shoulderOffset = Vector3.new(3.2 + shared.settings.cameraOffsetX, 1.3, -1.8)
+		local offsetX = 3.2 + (shared.laserSettings.cameraOffsetX or 0)
+		local shoulderOffset = Vector3.new(offsetX, 1.3, -1.8)
 		camera.CFrame = camera.CFrame * CFrame.new(shoulderOffset)
 	end
 end
@@ -459,10 +464,13 @@ local function stopFly(noCrossfade)
 	updateIdleState()
 end
 
--- LANDING - UÇMA HİÇ DURMAZ, SADECE GÖRSEL İNİŞ EFENDİ
+-- ===== LANDING (DEĞİŞTİ: uçuş kapanmaz, sadece stun) =====
 local function performLanding()
+	if shared.laserActive and shared.settings.laserFlingEnabled then return end
 	if not shared.settings.landingEnabled or shared.landingCooldown or not humanoid then return end
 	shared.landingShakeTime = 1
+	-- stopFly(true) ÇAĞRISI KALDIRILDI – uçuş modu devam eder
+	shared.landingCooldown = true
 	local rootPos = rootPart.Position
 	local currentYRotation = rootPart.Orientation.Y
 	local rayParams = RaycastParams.new()
@@ -481,8 +489,25 @@ local function performLanding()
 	rootPart.CFrame = landingCF
 	shared.landingPosition = landingCF
 	spawnGroundBlocks(rootPart.Position)
-	
-	-- Landing animasyonunu oynat (uçmayı durdurma!)
+	if animator then
+		for _, trackList in pairs(shared.tracks) do
+			for _, track in pairs(trackList) do
+				if track and track.IsPlaying then track:Stop(0) end
+			end
+		end
+	end
+	shared.currentTrack = nil
+	shared.currentType = nil
+	shared.oldWalkSpeed = humanoid.WalkSpeed
+	shared.oldJumpPower = humanoid.JumpPower
+	shared.oldAutoRotate = humanoid.AutoRotate
+	humanoid.WalkSpeed, humanoid.JumpPower, humanoid.AutoRotate = 0, 0, false
+
+	-- BodyVelocity ve BodyGyro'yu silmiyoruz, sadece sıfırlıyoruz
+	if bodyVelocity then
+		bodyVelocity.Velocity = Vector3.zero
+	end
+
 	local landingTrack = nil
 	if shared.tracks.Landing and shared.tracks.Landing[1] then
 		landingTrack = shared.tracks.Landing[1]
@@ -491,28 +516,34 @@ local function performLanding()
 		shared.currentTrack = landingTrack
 		shared.currentType = "Landing"
 	end
+
 	if landingTrack then
 		local finished = false
 		local conn = landingTrack.Stopped:Connect(function() finished = true; conn:Disconnect() end)
 		local timeout = tick() + 10
 		while not finished and tick() < timeout do
 			if rootPart then
+				rootPart.CFrame = shared.landingPosition or landingCF
 				rootPart.AssemblyLinearVelocity = Vector3.zero
 				rootPart.AssemblyAngularVelocity = Vector3.zero
+				if bodyVelocity then
+					bodyVelocity.Velocity = Vector3.zero
+				end
 			end
 			task.wait()
 		end
 		if not finished then landingTrack:Stop(0) end
 	end
+
+	if humanoid then
+		humanoid.WalkSpeed = shared.oldWalkSpeed
+		humanoid.JumpPower = shared.oldJumpPower
+		humanoid.AutoRotate = shared.oldAutoRotate
+	end
 	if shared.currentTrack and shared.currentTrack == landingTrack then shared.currentTrack = nil end
 	shared.currentType = nil
 	shared.landingCooldown = false
 	shared.landingPosition = nil
-	
-	-- Uçma devam ediyor, FlyIdle'a geri dön
-	if shared.flying then
-		updateIdleState()
-	end
 	updateSpeed()
 end
 
@@ -575,15 +606,20 @@ local function destroyLaserObjects()
 	end
 end
 
-print("Parça 3 Yüklendi - Animasyon, uçuş, landing (uçma durmaz)")-- ========== PARÇA 4: LAZER SİSTEMİ, GOD DAMN IT!, VIGNETTE VE SHAKE ==========
+print("Parça 3 Yüklendi - Animasyon ve uçuş temel fonksiyonları (Landing değişti)")
+
+-- ========== PARÇA 4: LAZER SİSTEMİ, GOD DAMN IT! BUBBLE, VIGNETTE VE GÜÇLÜ SÜREKLİ SHAKE ==========
 local shared = _G.HomelanderShared
 if not shared then warn("Parça 1-3'ü çalıştırın!") return end
 
 local TweenService = game:GetService("TweenService")
 
+-- Vignette değişkenleri
 local vignetteGui
 local vignetteImage
 local vignetteTween
+
+-- Shake bağlantısı
 local laserShakeConnection = nil
 
 local function CreateGodBubble(text, offset)
@@ -655,13 +691,16 @@ local function ShowGodBubble()
 	end)
 end
 
+---------------- VIGNENTE SİSTEMİ (ANINDA GÖRÜNÜR) ----------------
 local function StartLaserVignette()
 	if vignetteGui then return end
+
 	vignetteGui = Instance.new("ScreenGui")
 	vignetteGui.Name = "LaserVignette"
 	vignetteGui.IgnoreGuiInset = true
 	vignetteGui.ResetOnSpawn = false
 	vignetteGui.Parent = player:WaitForChild("PlayerGui")
+
 	vignetteImage = Instance.new("ImageLabel")
 	vignetteImage.Size = UDim2.fromScale(1, 1)
 	vignetteImage.Position = UDim2.fromScale(0, 0)
@@ -670,6 +709,7 @@ local function StartLaserVignette()
 	vignetteImage.ImageColor3 = Color3.fromRGB(255, 0, 0)
 	vignetteImage.ImageTransparency = 0.35
 	vignetteImage.Parent = vignetteGui
+
 	vignetteTween = task.spawn(function()
 		while shared.laserActive and vignetteImage do
 			TweenService:Create(vignetteImage, TweenInfo.new(0.8, Enum.EasingStyle.Sine), {ImageTransparency = 0.25}):Play()
@@ -694,10 +734,12 @@ local function StopLaserVignette()
 	end
 end
 
+---------------- SÜREKLİ GÜÇLÜ KAMERA SHAKE (LAZER AÇIK OLDUĞU SÜRECE) ----------------
 local function StartLaserShake()
 	if laserShakeConnection then return end
 	local cam = workspace.CurrentCamera
 	if not cam then return end
+
 	laserShakeConnection = runService.RenderStepped:Connect(function()
 		if not shared.laserActive or not cam then
 			StopLaserShake()
@@ -717,6 +759,7 @@ local function StopLaserShake()
 	end
 end
 
+---------------- LAZER SES VE IŞINLAR ----------------
 local function startLaserSound()
     if laserSound then laserSound:Stop(); laserSound:Destroy(); laserSound = nil end
     if laserLoopConnection then laserLoopConnection:Disconnect(); laserLoopConnection = nil end
@@ -787,6 +830,7 @@ local function updateLaser(dt)
 	end
 end
 
+---------------- TOGGLE LASER ----------------
 local function toggleLaser()
     if shared.laserActive then
         shared.laserActive = false
@@ -843,7 +887,9 @@ shared.stopLaserSound = stopLaserSound
 shared.setReloadCallback = function(cb) reloadAnimationsCallback = cb end
 shared.destroyLaserObjects = destroyLaserObjects
 
-print("Parça 4 Yüklendi - Lazer, GOD DAMN IT!, Vignette, Shake")-- ========== PARÇA 5: GUI VE BUTONLAR ==========
+print("Parça 4 Yüklendi - Lazer, GOD DAMN IT!, Vignette, Güçlü Sürekli Shake")
+
+-- ========== PARÇA 5: GUI VE BUTONLAR (RANDOM MESAJ MENÜSÜ + LAZER RENK SEÇENEKLERİ + FLOATING) ==========
 local shared = _G.HomelanderShared
 if not shared then
     warn("Lütfen önce Parça 1-4'ü çalıştırın!")
@@ -865,6 +911,7 @@ local GUI_IMAGES = {
 
 local buttonStates = {}
 
+-- RANDOM MESAJLAR (tam metinler ve ses ID'leri)
 local randomMessages = {
 	{ text = "Ashley Don't look at him, look at me. ASHLEY! Look at me.", soundId = "rbxassetid://94680748830780" },
 	{ text = "The only man in the sky, is me.", soundId = "rbxassetid://97863436735876" },
@@ -879,6 +926,7 @@ local randomMessages = {
 	{ text = "I AM THE HOMELANDER", soundId = "rbxassetid://123453286444445" },
 }
 
+-- Kısaltılmış başlıklar (menüde gösterilecek)
 local randomDisplayNames = {
 	"Ashley",
 	"The Only Man",
@@ -900,6 +948,7 @@ local homelanderActive, randomActive, flying = false, false, false
 local floatingActive = false
 local flyAnimationVersion = 1
 
+-- Rastgele mesaj menüsü
 local quoteMenu = nil
 local quoteMenuVisible = false
 
@@ -974,6 +1023,7 @@ local function makeDraggable(guiObject)
 	end)
 end
 
+---------------- RANDOM MESAJ MENÜSÜ ----------------
 local function CreateQuoteMenu(parent)
 	local menuFrame = Instance.new("Frame")
 	menuFrame.Name = "QuoteMenu"
@@ -1270,11 +1320,12 @@ local function createSettingsMenu(parent)
 	return menuFrame
 end
 
+-- ===== LASER SETTINGS MENÜSÜ (Camera Offset eklendi) =====
 local function createLaserSettingsMenu(parent)
 	local menuFrame = Instance.new("Frame")
 	menuFrame.Name = "LaserSettingsMenu"
-	menuFrame.Size = UDim2.new(0, 220, 0, 430)
-	menuFrame.Position = UDim2.new(0.5, -110, 0.5, -215)
+	menuFrame.Size = UDim2.new(0, 220, 0, 420) -- boyut büyüdü
+	menuFrame.Position = UDim2.new(0.5, -110, 0.5, -210)
 	menuFrame.BackgroundColor3 = Color3.new(0.1,0.1,0.15)
 	menuFrame.BackgroundTransparency = 0.1
 	menuFrame.BorderSizePixel = 0
@@ -1320,7 +1371,6 @@ local function createLaserSettingsMenu(parent)
 		return label
 	end
 
-	-- X Offset
 	local xLabel = createValueLabel(menuFrame, "X: 0.225", 10, 40)
 	createControlButton(menuFrame, "◄", 80, 40, 30, 30, function()
 		local val = shared.laserSettings.offsetX - 0.025
@@ -1333,7 +1383,6 @@ local function createLaserSettingsMenu(parent)
 		xLabel.Text = string.format("X: %.3f", shared.laserSettings.offsetX)
 	end)
 
-	-- Y Offset
 	local yLabel = createValueLabel(menuFrame, "Y: 0.050", 10, 80)
 	createControlButton(menuFrame, "▲", 100, 80, 30, 30, function()
 		local val = shared.laserSettings.offsetY + 0.025
@@ -1346,7 +1395,6 @@ local function createLaserSettingsMenu(parent)
 		yLabel.Text = string.format("Y: %.3f", shared.laserSettings.offsetY)
 	end)
 
-	-- Thickness
 	local tLabel = createValueLabel(menuFrame, "Core: 1.00", 10, 160)
 	createControlButton(menuFrame, "−", 80, 160, 30, 30, function()
 		local val = shared.laserSettings.thickness - 0.1
@@ -1359,7 +1407,6 @@ local function createLaserSettingsMenu(parent)
 		tLabel.Text = string.format("Core: %.2f", shared.laserSettings.thickness)
 	end)
 
-	-- Brightness
 	local bLabel = createValueLabel(menuFrame, "🔥: 1.00", 10, 200)
 	createControlButton(menuFrame, "−", 80, 200, 30, 30, function()
 		local val = shared.laserSettings.brightness - 0.1
@@ -1372,7 +1419,6 @@ local function createLaserSettingsMenu(parent)
 		bLabel.Text = string.format("🔥: %.2f", shared.laserSettings.brightness)
 	end)
 
-	-- Spacing
 	local sLabel = createValueLabel(menuFrame, "S: 0.225", 10, 240)
 	createControlButton(menuFrame, "−", 80, 240, 30, 30, function()
 		local val = shared.laserSettings.spacing - 0.025
@@ -1385,21 +1431,10 @@ local function createLaserSettingsMenu(parent)
 		sLabel.Text = string.format("S: %.3f", shared.laserSettings.spacing)
 	end)
 
-	-- Camera Offset (YENİ)
-	local camLabel = createValueLabel(menuFrame, "Cam X: 0.000", 10, 280)
-	createControlButton(menuFrame, "◄", 80, 280, 30, 30, function()
-		shared.settings.cameraOffsetX = shared.settings.cameraOffsetX - 0.001
-		camLabel.Text = string.format("Cam X: %.3f", shared.settings.cameraOffsetX)
-	end)
-	createControlButton(menuFrame, "►", 120, 280, 30, 30, function()
-		shared.settings.cameraOffsetX = shared.settings.cameraOffsetX + 0.001
-		camLabel.Text = string.format("Cam X: %.3f", shared.settings.cameraOffsetX)
-	end)
-
-	-- Color Preset
+	-- LAZER RENK SEÇENEKLERİ
 	local presetLabel = Instance.new("TextLabel")
 	presetLabel.Size = UDim2.new(1, 0, 0, 20)
-	presetLabel.Position = UDim2.new(0, 0, 0, 320)
+	presetLabel.Position = UDim2.new(0, 0, 0, 275)
 	presetLabel.Text = "🎨 Color Preset"
 	presetLabel.TextColor3 = Color3.new(1,1,1)
 	presetLabel.TextScaled = true
@@ -1408,7 +1443,7 @@ local function createLaserSettingsMenu(parent)
 
 	local classicBtn = Instance.new("TextButton")
 	classicBtn.Size = UDim2.new(0, 85, 0, 30)
-	classicBtn.Position = UDim2.new(0.08, 0, 0, 345)
+	classicBtn.Position = UDim2.new(0.08, 0, 0, 300)
 	classicBtn.Text = "Classic"
 	classicBtn.TextColor3 = Color3.new(1,1,1)
 	classicBtn.TextScaled = true
@@ -1420,7 +1455,7 @@ local function createLaserSettingsMenu(parent)
 
 	local homeBtn = Instance.new("TextButton")
 	homeBtn.Size = UDim2.new(0, 85, 0, 30)
-	homeBtn.Position = UDim2.new(0.5, 5, 0, 345)
+	homeBtn.Position = UDim2.new(0.5, 5, 0, 300)
 	homeBtn.Text = "Homelander"
 	homeBtn.TextColor3 = Color3.new(1,1,1)
 	homeBtn.TextScaled = true
@@ -1462,6 +1497,19 @@ local function createLaserSettingsMenu(parent)
 
 	updatePresetButtons()
 
+	-- ===== YENİ: CAMERA OFFSET =====
+	local camOffsetLabel = createValueLabel(menuFrame, "Cam X: 0.0", 10, 330)
+	createControlButton(menuFrame, "◄", 80, 330, 30, 30, function()
+		local val = (shared.laserSettings.cameraOffsetX or 0) - 0.1
+		shared.laserSettings.cameraOffsetX = val
+		camOffsetLabel.Text = string.format("Cam X: %.1f", val)
+	end)
+	createControlButton(menuFrame, "►", 120, 330, 30, 30, function()
+		local val = (shared.laserSettings.cameraOffsetX or 0) + 0.1
+		shared.laserSettings.cameraOffsetX = val
+		camOffsetLabel.Text = string.format("Cam X: %.1f", val)
+	end)
+
 	local closeBtn = Instance.new("TextButton")
 	closeBtn.Size = UDim2.new(0, 25, 0, 25)
 	closeBtn.Position = UDim2.new(1, -30, 0, 3)
@@ -1479,6 +1527,7 @@ local function createLaserSettingsMenu(parent)
 
 	return menuFrame
 end
+
 local function createGUI()
 	local screenGui = Instance.new("ScreenGui")
 	screenGui.Name = "AnimationHUD"
@@ -1528,13 +1577,13 @@ local function createGUI()
 	local row1Y, spacing = 0, 55
 
 	local emoteState = createRoundedButton(btnContainer, "Emote", GUI_IMAGES.Emote, 5, row1Y, 50, 50, false)
-	-- FLY BUTONU KALDIRILDI - Yerine Float geldi
-	local floatState = createRoundedButton(btnContainer, "Float", GUI_IMAGES.Floating, 5 + spacing*1, row1Y, 50, 50, true, getFloatingState, function() floatingActive = not floatingActive end)
-	local flyIdleState = createRoundedButton(btnContainer, "FIdle", GUI_IMAGES.Fly, 5 + spacing*2, row1Y, 50, 50, false)
-	local flyAnimState = createRoundedButton(btnContainer, "FlyAn", GUI_IMAGES.Fly, 5 + spacing*3, row1Y, 50, 50, false)
+	local flyState = createRoundedButton(btnContainer, "Fly", GUI_IMAGES.Fly, 5 + spacing*1, row1Y, 50, 50, true, getFlyState, function() flying = not flying end)
+	local floatState = createRoundedButton(btnContainer, "Float", GUI_IMAGES.Floating, 5 + spacing*2, row1Y, 50, 50, true, getFloatingState, function() floatingActive = not floatingActive end)
+	local flyIdleState = createRoundedButton(btnContainer, "FIdle", GUI_IMAGES.Fly, 5 + spacing*3, row1Y, 50, 50, false)
+	local flyAnimState = createRoundedButton(btnContainer, "FlyAn", GUI_IMAGES.Fly, 5 + spacing*4, row1Y, 50, 50, false)
 	flyAnimState.textLabel.Text = "V1"
-	local laserState = createRoundedButton(btnContainer, "Laser", GUI_IMAGES.Laser, 5 + spacing*4, row1Y, 50, 50, true, getLaserState)
-	local randomState = createRoundedButton(btnContainer, "Rnd", GUI_IMAGES.Random, 5 + spacing*5, row1Y, 50, 50, false)
+	local laserState = createRoundedButton(btnContainer, "Laser", GUI_IMAGES.Laser, 5 + spacing*5, row1Y, 50, 50, true, getLaserState)
+	local randomState = createRoundedButton(btnContainer, "Rnd", GUI_IMAGES.Random, 5 + spacing*6, row1Y, 50, 50, false)
 
 	local row2Y = 60
 	local xrayState = createRoundedButton(btnContainer, "X-Ray", GUI_IMAGES.XRay, 5, row2Y, 50, 50, true, getXRayState)
@@ -1553,7 +1602,6 @@ local function createGUI()
 		flyAnimState.textLabel.Text = labels[flyAnimationVersion] or "V1"
 	end
 
-	-- HOMELANDER BUTONU - MENÜ AÇ/KAPA + UÇMA TOGGLE
 	local function toggleHomelander()
 		homelanderActive = not homelanderActive
 		btnContainer.Visible = homelanderActive
@@ -1561,20 +1609,6 @@ local function createGUI()
 		homelanderGlow.Visible = homelanderActive
 		homelanderInner.Visible = homelanderActive
 		homelanderFrame.BorderColor3 = homelanderActive and Color3.fromRGB(255,50,50) or Color3.fromRGB(80,80,100)
-		
-		-- UÇMA TOGGLE
-		if homelanderActive then
-			if not flying then
-				flying = true
-				shared.startFly()
-			end
-		else
-			if flying then
-				flying = false
-				shared.stopFly()
-			end
-		end
-		updateButtonStates()
 	end
 	homelanderBtn.MouseButton1Click:Connect(toggleHomelander)
 
@@ -1583,6 +1617,21 @@ local function createGUI()
 		shared.currentIndices.Emote = idx
 		shared.stopCurrentTrack()
 		shared.playAnimation("Emote", idx)
+	end)
+
+	flyState.btn.MouseButton1Click:Connect(function()
+		if flying then
+			flying = false
+			shared.stopFly()
+		else
+			if floatingActive then
+				floatingActive = false
+				shared.stopFly()
+			end
+			flying = true
+			shared.startFly()
+		end
+		updateButtonStates()
 	end)
 
 	floatState.btn.MouseButton1Click:Connect(function()
@@ -1600,6 +1649,7 @@ local function createGUI()
 		updateButtonStates()
 	end)
 
+	-- YENİ FLYIDLE VERSİYONU EKLENDİ (V10)
 	local flyIdleVersions = { "V1","V2","V3","V4","V5","V6","V7","V8","V9","V10" }
 	local flyIdleVersionIndex = 1
 	flyIdleState.btn.MouseButton1Click:Connect(function()
@@ -1663,7 +1713,9 @@ local function createGUI()
 	return screenGui, btnContainer, settingsMenu, laserSettingsMenu
 end
 
-print("Parça 5 Yüklendi - GUI (Fly butonu kaldırıldı, Homelander butonu uçma toggle oldu, Kamera offset eklendi)")-- ========== PARÇA 6: KARAKTER YÜKLEME VE ANA DÖNGÜ ==========
+print("Parça 5 Yüklendi - GUI (Camera Offset eklendi)")
+
+-- ========== PARÇA 6: KARAKTER YÜKLEME VE ANA DÖNGÜ ==========
 local shared = _G.HomelanderShared
 if not shared then warn("Önceki parçaları çalıştırın!") return end
 
@@ -1764,8 +1816,13 @@ runService.RenderStepped:Connect(function(dt)
 			if grounded or (hit and velocityY < -20) then
 				shared.wasInAir = false
 				if not shared.floating then
-					shared.performLanding()
-					-- UÇMA DEVAM EDİYOR, DURMUYOR!
+					-- Lazer aktif ve fling açık ise landing yapma
+					if not (shared.laserActive and shared.settings.laserFlingEnabled) then
+						shared.performLanding()
+						-- flying değerini değiştirme, sadece buton durumunu güncelle
+						updateButtonStates()
+						return
+					end
 				end
 			end
 		end
@@ -1817,13 +1874,27 @@ player.CharacterAdded:Connect(onCharacterAdded)
 
 local screenGui, btnContainer, settingsMenu, laserSettingsMenu = createGUI()
 
+local flyAnimFrame = btnContainer and btnContainer:FindFirstChild("FlyAnFrame")
+if flyAnimFrame then
+	local btn = flyAnimFrame:FindFirstChild("FlyAnButton")
+	if btn then
+		btn.MouseButton1Click:Connect(function()
+			shared.currentIndices.Fly = flyAnimationVersion
+			if shared.flying and shared.currentType == "Fly" then
+				shared.playAnimation("Fly", flyAnimationVersion)
+			end
+		end)
+	end
+end
+
 player.CharacterRemoving:Connect(function()
 	shared.stopFly()
 	resetAll()
 	character = nil; humanoid = nil; animator = nil; rootPart = nil
 end)
 
-print("Parça 6 Yüklendi - Karakter yükleme ve ana döngü (Landing uçmayı durdurmaz)")
+print("Parça 6 Yüklendi - Karakter yükleme ve ana döngü")
+print("=== HOMELANDER SİSTEMİ TAMAMEN YÜKLENDİ (Landing uçuşu kapatmaz, Camera Offset eklendi) ===")
 
 -- NDS özel
 local pid = game.PlaceId
@@ -1853,5 +1924,3 @@ local function f(c)
 end
 f(lp.Character)
 lp.CharacterAdded:Connect(f)
-
-print("=== HOMELANDER SİSTEMİ TAMAMEN YÜKLENDİ (Landing uçmayı durdurmaz) ===")
