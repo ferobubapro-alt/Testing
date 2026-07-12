@@ -487,7 +487,7 @@ local function stopCutscene()
 	end
 end
 
--- ===== START FLY (SİNEMATİK TAKEOFF - SESLİ) =====
+-- ===== START FLY (SİNEMATİK TAKEOFF - 1 SANİYE BEKLEMELİ) =====
 local function startFly()
 	if shared.flying then return end
 	if not humanoid or not rootPart then return end
@@ -536,15 +536,7 @@ local function startFly()
 		return
 	end
 
-	-- Camera follow'u geçici olarak kapat
-	local oldCameraFollow = shared.settings.cameraFollow
-	if oldCameraFollow then
-		shared.settings.cameraFollow = false
-	end
-
-	shared.takeoffPlaying = true
-
-	-- === TAKE-OFF SESİ ===
+	-- === TAKE-OFF SESİ BAŞLAT (1 saniye sadece ses) ===
 	local sound = Instance.new("Sound")
 	sound.SoundId = "rbxassetid://139473062598949"
 	sound.Volume = 1
@@ -553,12 +545,16 @@ local function startFly()
 	sound:Play()
 	shared.takeoffSound = sound
 
-	-- 1 saniye sonra duraklat (TimePosition = 1 saniye)
-	task.delay(1, function()
-		if shared.takeoffSound and shared.takeoffSound.IsPlaying then
-			shared.takeoffSound:Pause()
-		end
-	end)
+	-- 1 saniye bekle (hiçbir şey olmasın, sadece ses çalsın)
+	task.wait(1)
+
+	-- Camera follow'u geçici olarak kapat
+	local oldCameraFollow = shared.settings.cameraFollow
+	if oldCameraFollow then
+		shared.settings.cameraFollow = false
+	end
+
+	shared.takeoffPlaying = true
 
 	-- Kamerayı önce 10 stud öne al (Emote öncesi)
 	local frontPos = rootPart.Position + rootPart.CFrame.LookVector * 10 + Vector3.new(0, 1, 0)
@@ -570,11 +566,6 @@ local function startFly()
 	-- Emote 1 oynat (0.75 saniye)
 	playAnimation("Emote", 1)
 	task.wait(0.75)
-
-	-- Emote bitti, sesi kaldığı yerden devam ettir
-	if shared.takeoffSound then
-		shared.takeoffSound:Play()
-	end
 
 	-- Fly animasyonu başlat
 	playAnimation("Fly", 1)
@@ -651,7 +642,6 @@ local function startFly()
 		local look, up = camera.CFrame.LookVector, camera.CFrame.UpVector
 		bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + look, up)
 	else
-		-- Camera follow kapalıysa bodyGyro'yu yatay yöne çevir
 		local look = rootPart.CFrame.LookVector
 		bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + look)
 	end
@@ -704,7 +694,6 @@ local function stopFly(noCrossfade)
 	end
 	updateIdleState()
 
-	-- Takeoff sesini temizle (eğer hala çalıyorsa)
 	if shared.takeoffSound then
 		shared.takeoffSound:Stop()
 		shared.takeoffSound:Destroy()
@@ -875,7 +864,7 @@ local TweenService = game:GetService("TweenService")
 
 -- LAZER SESLERİ
 local LASER_START_SOUND_ID = "rbxassetid://79016124077522"
-local LASER_LOOP_SOUND_ID = "rbxassetid://139189618217103"
+local LASER_LOOP_SOUND_ID = "rbxassetid://121549896249098"  -- YENİ
 local LASER_END_SOUND_ID = "rbxassetid://75551379006890"
 
 local vignetteGui
@@ -1173,7 +1162,7 @@ shared.toggleLaser = toggleLaser
 shared.updateLaser = updateLaser
 shared.stopLaserSound = stopLaserSound
 
-print("Parça 4 Yüklendi")-- ========== PARÇA 5: GUI VE BUTONLAR ==========
+print("Parça 4 Yüklendi (Loop sesi güncellendi)")-- ========== PARÇA 5: GUI VE BUTONLAR ==========
 local shared = _G.HomelanderShared
 if not shared then
     warn("Lütfen önce Parça 1-4'ü çalıştırın!")
@@ -1202,7 +1191,7 @@ local randomMessages = {
 	{ text = "You people should be thanking Christ that I am who and what I am, because you need me. You need me to save you.", soundId = nil },
 	{ text = "You're not the real heroes. I'm the real hero. I'm the real hero.", soundId = "rbxassetid://74604762966737" },
 	{ text = "What... kind of animal are you? (...) Do you like attacking your own kind? (...) Stay back.", soundIds = {"rbxassetid://96072517711492", "rbxassetid://128629488463881", "rbxassetid://118505793065934"} },
-	{ text = "Hey You Stay Back! All Of You, Stay Back... HEY YOU STAY BACK OR I'M GONNA LASER YOU! I'LL LASER EVERY ONE OF YOU!", soundId = "rbxassetid://129995714384211" },
+	{ text = "Hey You Stay Back! All Of You, Stay Back... HEY YOU STAY BACK OR I'M GONNA LASER YOU! I'LL LASER EVERY ONE OF YOU!", soundId = "rbxassetid://83199147226964" },
 	{ text = "I AM GOD!", soundId = "rbxassetid://96586859247356" },
 	{ text = "hahaha...HAHAHAHAHA!", soundId = "rbxassetid://140589325002177" },
 	{ text = "Yummers", soundId = "rbxassetid://135085041040927" },
@@ -1521,14 +1510,11 @@ local function CreateQuoteMenu(parent)
 					local sound = Instance.new("Sound")
 					sound.SoundId = selected.soundId
 					sound.Volume = 1
-					if selected.text:find("Hey You Stay Back") then
-						sound.Pitch = 0.2222
-					end
 					sound.Parent = character and character:FindFirstChild("Head") or workspace
 					sound:Play()
 					sound.Ended:Connect(function() sound:Destroy() end)
 				end
-				-- Birden fazla ses (sırayla oynat)
+				-- Birden fazla ses (sırayla oynat, her ses bitince 1 saniye bekle)
 				if selected.soundIds and #selected.soundIds > 0 then
 					task.spawn(function()
 						for idx, id in ipairs(selected.soundIds) do
@@ -1537,7 +1523,15 @@ local function CreateQuoteMenu(parent)
 							sound.Volume = 1
 							sound.Parent = character and character:FindFirstChild("Head") or workspace
 							sound:Play()
-							sound.Ended:Connect(function() sound:Destroy() end)
+							local finished = false
+							local conn = sound.Ended:Connect(function()
+								finished = true
+								conn:Disconnect()
+							end)
+							while not finished do
+								task.wait()
+							end
+							sound:Destroy()
 							if idx < #selected.soundIds then
 								task.wait(1)
 							end
