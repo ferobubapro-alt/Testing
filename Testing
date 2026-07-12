@@ -67,6 +67,7 @@ _G.HomelanderShared.currentTrack = nil
 _G.HomelanderShared.currentType = nil
 _G.HomelanderShared.currentIndices = { Fly = 1, FlyIdle = 1, Emote = 1, Landing = 1, LaserIdle = 1 }
 _G.HomelanderShared.CROSSFADE_TIME = 0.7
+_G.HomelanderShared.FLY_CROSSFADE_TIME = 0.3  -- <-- Fly animasyonları için özel crossfade
 _G.HomelanderShared.tracks = { Fly = {}, FlyIdle = {}, Emote = {}, Landing = {}, LaserIdle = {} }
 
 _G.HomelanderShared.landingCooldown = false
@@ -94,7 +95,7 @@ _G.HomelanderShared.clientVisualCFrame = CFrame.new()
 getgenv().OldPos = nil
 getgenv().FPDH = workspace.FallenPartsDestroyHeight
 
-print("Parça 1 Yüklendi - Değişkenler ve ayarlar")-- ========== PARÇA 2: FLING MOTORU ==========
+print("Parça 1 Yüklendi - Değişkenler ve ayarlar (Fly crossfade 0.3 eklendi)")-- ========== PARÇA 2: FLING MOTORU ==========
 function _G.HomelanderShared.SkidFling(TargetPlayer)
     local Character = player.Character
     local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
@@ -177,7 +178,7 @@ runService.RenderStepped:Connect(function()
     end
 end)
 
-print("Parça 2 Yüklendi - Fling motoru")-- ========== PARÇA 3: ANİMASYON, UÇUŞ, KAMERA, LANDING (GÜNCELLENDİ) ==========
+print("Parça 2 Yüklendi - Fling motoru")-- ========== PARÇA 3: ANİMASYON, UÇUŞ, KAMERA, LANDING (BÖLÜM 1) ==========
 local shared = _G.HomelanderShared
 if not shared then warn("Parça 1'i çalıştırın!") return end
 
@@ -246,7 +247,7 @@ local function stopCurrentTrack()
 	shared.currentType = nil
 end
 
--- === MERKEZİ ANİMASYON OYNATICI (TimePosition koruması eklendi) ===
+-- ===== GÜNCELLENEN playAnimation (Fly crossfade 0.3, aynı track korunur) =====
 local function playAnimation(animType, index)
 	if not animator then return end
 	local newTrack = shared.tracks[animType][index]
@@ -257,27 +258,17 @@ local function playAnimation(animType, index)
 			if not newTrack then return end
 		else return end
 	end
-
-	-- Aynı track zaten oynuyorsa, zamanı koru ve çık
+	-- Aynı track ise hiçbir şey yapma (TimePosition korunur)
 	if shared.currentTrack == newTrack and newTrack.IsPlaying then
 		return
 	end
-
-	-- Eski track'i durdur (crossfade ile)
+	-- Farklı track ise durdur ve yeni track'i oynat
 	if shared.currentTrack then
 		shared.currentTrack:Stop(shared.CROSSFADE_TIME)
 	end
-
-	-- Eğer aynı tipte geçiş yapıyorsak (örneğin FlyIdle -> FlyIdle), TimePosition'u koru
-	local preserveTime = (shared.currentType == animType and shared.currentTrack and shared.currentTrack.IsPlaying)
-	local timePos = preserveTime and shared.currentTrack.TimePosition or 0
-
-	-- Yeni track'i başlat
-	newTrack:Play(shared.CROSSFADE_TIME)
-	if preserveTime and timePos > 0 then
-		newTrack.TimePosition = math.min(timePos, newTrack.Length) -- süreyi aşma
-	end
-
+	-- Fly animasyonları için crossfade 0.3, diğerleri 0.7
+	local crossfade = (animType == "Fly") and shared.FLY_CROSSFADE_TIME or shared.CROSSFADE_TIME
+	newTrack:Play(crossfade)
 	shared.currentTrack = newTrack
 	shared.currentType = animType
 	shared.currentIndices[animType] = index
@@ -413,11 +404,6 @@ local function startFly()
 	shared.flying = true
 	updateSpeed()
 	updateCollision()
-	-- Varsayılan zıplama/düşme animasyonlarını devre dışı bırak
-	if humanoid then
-		humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
-		humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
-	end
 	bodyVelocity = Instance.new("BodyVelocity")
 	bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
 	bodyVelocity.Velocity = Vector3.zero
@@ -443,10 +429,6 @@ local function startFloating()
 	shared.floating = true
 	updateSpeed()
 	updateCollision()
-	if humanoid then
-		humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
-		humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
-	end
 	bodyVelocity = Instance.new("BodyVelocity")
 	bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
 	bodyVelocity.Velocity = Vector3.zero
@@ -469,10 +451,6 @@ local function stopFly(noCrossfade)
 	if shared.floating then
 		shared.floating = false
 	end
-	if humanoid then
-		humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
-		humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
-	end
 	if bodyVelocity then bodyVelocity:Destroy(); bodyVelocity = nil end
 	if bodyGyro then bodyGyro:Destroy(); bodyGyro = nil end
 	updateCollision()
@@ -490,7 +468,7 @@ local function stopFly(noCrossfade)
 	updateIdleState()
 end
 
--- ===== LANDING (artık playAnimation kullanıyor) =====
+-- ===== LANDING KONTROLÜ + 1.5x HIZ =====
 local function performLanding()
 	if shared.laserActive and shared.settings.laserFlingEnabled then
 		return
@@ -517,11 +495,10 @@ local function performLanding()
 	rootPart.CFrame = landingCF
 	shared.landingPosition = landingCF
 	spawnGroundBlocks(rootPart.Position)
-	-- Tüm track'leri durdur (crossfade ile)
 	if animator then
 		for _, trackList in pairs(shared.tracks) do
 			for _, track in pairs(trackList) do
-				if track and track.IsPlaying then track:Stop(shared.CROSSFADE_TIME) end
+				if track and track.IsPlaying then track:Stop(0) end
 			end
 		end
 	end
@@ -538,12 +515,15 @@ local function performLanding()
 		landingBodyVelocity.Velocity = Vector3.new(0, 0, 0)
 		landingBodyVelocity.Parent = rootPart
 	end
-	-- Landing animasyonunu merkezi fonksiyonla oynat
+	local landingTrack = nil
 	if shared.tracks.Landing and shared.tracks.Landing[1] then
-		playAnimation("Landing", 1)
+		landingTrack = shared.tracks.Landing[1]
+		landingTrack:Play(0)
+		landingTrack.Priority = Enum.AnimationPriority.Action4
+		landingTrack.Speed = 1.5  -- <-- 1.5x HIZ
+		shared.currentTrack = landingTrack
+		shared.currentType = "Landing"
 	end
-	-- Landing süresi boyunca bekle
-	local landingTrack = shared.currentTrack
 	if landingTrack then
 		local finished = false
 		local conn = landingTrack.Stopped:Connect(function() finished = true; conn:Disconnect() end)
@@ -568,10 +548,8 @@ local function performLanding()
 	shared.landingCooldown = false
 	shared.landingPosition = nil
 	updateSpeed()
-	updateIdleState()
 end
 
--- Lazer oluşturma fonksiyonları (değişmedi)
 local function createLaserBeams(offset)
 	local head = character and character:FindFirstChild("Head")
 	if not head then return nil end
@@ -631,23 +609,7 @@ local function destroyLaserObjects()
 	end
 end
 
--- Dışa açılanlar
-shared.stopFly = stopFly
-shared.startFly = startFly
-shared.startFloating = startFloating
-shared.updateLaser = updateLaser -- bu fonksiyon parça 4'te tanımlı
-shared.performLanding = performLanding
-shared.stopCurrentTrack = stopCurrentTrack
-shared.playAnimation = playAnimation
-shared.updateIdleState = updateIdleState
-shared.checkEmoteCancel = checkEmoteCancel
-shared.accelerateNormalSpeed = accelerateNormalSpeed
-shared.updateSmoothEffects = updateSmoothEffects
-shared.updateCamera = updateCamera
-shared.destroyLaserObjects = destroyLaserObjects
-shared.setReloadCallback = function(cb) reloadAnimationsCallback = cb end
-
-print("Parça 3 Güncellendi - Merkezi animasyon yöneticisi, TimePosition koruma, Landing playAnimation kullanıyor")-- ========== PARÇA 4: LAZER, VIGNETTE, SHAKE, GOD BUBBLE (GÜNCELLENDİ) ==========
+print("Parça 3 Yüklendi - Fly crossfade 0.3, Landing 1.5x, FlyIdle TimePosition korunur")-- ========== PARÇA 4: LAZER SİSTEMİ, GOD DAMN IT! BUBBLE, VIGNETTE VE GÜÇLÜ SÜREKLİ SHAKE ==========
 local shared = _G.HomelanderShared
 if not shared then warn("Parça 1-3'ü çalıştırın!") return end
 
@@ -661,33 +623,85 @@ local vignetteTween
 -- Shake bağlantısı
 local laserShakeConnection = nil
 
--- Vignette ve Shake için global erişim (resetAll'de çağrılabilmesi için)
-_G._StopLaserVignette = function()
-	if vignetteTween then
-		task.cancel(vignetteTween)
-		vignetteTween = nil
-	end
-	if vignetteGui then
-		vignetteGui:Destroy()
-		vignetteGui = nil
-		vignetteImage = nil
-	end
+local function CreateGodBubble(text, offset)
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "GodBubble"
+	billboard.Size = UDim2.new(0, 60, 0, 18)
+	billboard.StudsOffset = offset
+	billboard.AlwaysOnTop = true
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBold
+	label.TextColor3 = Color3.fromRGB(255, 20, 60)
+	label.TextStrokeTransparency = 0
+	label.TextTransparency = 1
+	label.TextStrokeColor3 = Color3.new(0, 0, 0)
+	label.Text = text
+	label.Parent = billboard
+	return billboard, label
 end
 
-_G._StopLaserShake = function()
-	if laserShakeConnection then
-		laserShakeConnection:Disconnect()
-		laserShakeConnection = nil
-	end
+local function FadeIn(label)
+	if not label then return end
+	TweenService:Create(label, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {TextTransparency = 0, TextStrokeTransparency = 0}):Play()
 end
 
+local function FadeOut(label)
+	if not label then return end
+	TweenService:Create(label, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {TextTransparency = 1, TextStrokeTransparency = 1}):Play()
+end
+
+local function HideGodBubble()
+	if bubbleCoroutine then task.cancel(bubbleCoroutine); bubbleCoroutine = nil end
+	local head = character and character:FindFirstChild("Head")
+	if not head then
+		if godBubbleGui then godBubbleGui:Destroy(); godBubbleGui = nil end
+		godBubbleLabel = nil
+		return
+	end
+	for _, gui in ipairs(head:GetChildren()) do
+		if gui:IsA("BillboardGui") and gui.Name == "GodBubble" then
+			local label = gui:FindFirstChildOfClass("TextLabel")
+			if label then
+				FadeOut(label)
+				task.delay(0.25, function() if gui and gui.Parent then gui:Destroy() end end)
+			end
+		end
+	end
+	godBubbleGui = nil; godBubbleLabel = nil
+end
+
+local function ShowGodBubble()
+	HideGodBubble()
+	local head = character and character:FindFirstChild("Head")
+	if not head then return end
+	if bubbleCoroutine then task.cancel(bubbleCoroutine); bubbleCoroutine = nil end
+	bubbleCoroutine = task.spawn(function()
+		task.wait(2)
+		if not shared.laserActive then return end
+		godBubbleGui, godBubbleLabel = CreateGodBubble("GOD DAMN IT!", Vector3.new(-1.8, 1.3, 0))
+		godBubbleGui.Parent = head
+		FadeIn(godBubbleLabel)
+		task.wait(3)
+		if godBubbleLabel then FadeOut(godBubbleLabel) end
+		task.wait(0.25)
+		if godBubbleGui then godBubbleGui:Destroy(); godBubbleGui = nil; godBubbleLabel = nil end
+		bubbleCoroutine = nil
+	end)
+end
+
+---------------- VIGNENTE SİSTEMİ (ANINDA GÖRÜNÜR) ----------------
 local function StartLaserVignette()
 	if vignetteGui then return end
+
 	vignetteGui = Instance.new("ScreenGui")
 	vignetteGui.Name = "LaserVignette"
 	vignetteGui.IgnoreGuiInset = true
 	vignetteGui.ResetOnSpawn = false
 	vignetteGui.Parent = player:WaitForChild("PlayerGui")
+
 	vignetteImage = Instance.new("ImageLabel")
 	vignetteImage.Size = UDim2.fromScale(1, 1)
 	vignetteImage.Position = UDim2.fromScale(0, 0)
@@ -696,6 +710,7 @@ local function StartLaserVignette()
 	vignetteImage.ImageColor3 = Color3.fromRGB(255, 0, 0)
 	vignetteImage.ImageTransparency = 0.35
 	vignetteImage.Parent = vignetteGui
+
 	vignetteTween = task.spawn(function()
 		while shared.laserActive and vignetteImage do
 			TweenService:Create(vignetteImage, TweenInfo.new(0.8, Enum.EasingStyle.Sine), {ImageTransparency = 0.25}):Play()
@@ -720,10 +735,12 @@ local function StopLaserVignette()
 	end
 end
 
+---------------- SÜREKLİ GÜÇLÜ KAMERA SHAKE (LAZER AÇIK OLDUĞU SÜRECE) ----------------
 local function StartLaserShake()
 	if laserShakeConnection then return end
 	local cam = workspace.CurrentCamera
 	if not cam then return end
+
 	laserShakeConnection = runService.RenderStepped:Connect(function()
 		if not shared.laserActive or not cam then
 			StopLaserShake()
@@ -743,7 +760,7 @@ local function StopLaserShake()
 	end
 end
 
--- Lazer ses (değişmedi)
+---------------- LAZER SES VE IŞINLAR ----------------
 local function startLaserSound()
     if laserSound then laserSound:Stop(); laserSound:Destroy(); laserSound = nil end
     if laserLoopConnection then laserLoopConnection:Disconnect(); laserLoopConnection = nil end
@@ -778,7 +795,6 @@ local function stopLaserSound()
     end
 end
 
--- updateLaser (değişmedi)
 local function updateLaser(dt)
 	if not character or not character:FindFirstChild("Head") then destroyLaserObjects(); return end
 	local head = character.Head
@@ -815,7 +831,7 @@ local function updateLaser(dt)
 	end
 end
 
--- TOGGLE LASER (değişmedi)
+---------------- TOGGLE LASER ----------------
 local function toggleLaser()
     if shared.laserActive then
         shared.laserActive = false
@@ -855,16 +871,24 @@ shared.updateLaserSettings = function(setting, value)
     end
 end
 
--- Dışa açılanlar
+shared.stopFly = stopFly
+shared.startFly = startFly
+shared.startFloating = startFloating
 shared.toggleLaser = toggleLaser
 shared.updateLaser = updateLaser
+shared.performLanding = performLanding
+shared.stopCurrentTrack = stopCurrentTrack
+shared.playAnimation = playAnimation
+shared.updateIdleState = updateIdleState
+shared.checkEmoteCancel = checkEmoteCancel
+shared.accelerateNormalSpeed = accelerateNormalSpeed
+shared.updateSmoothEffects = updateSmoothEffects
+shared.updateCamera = updateCamera
 shared.stopLaserSound = stopLaserSound
+shared.setReloadCallback = function(cb) reloadAnimationsCallback = cb end
 shared.destroyLaserObjects = destroyLaserObjects
--- Vignette/Shake temizleme fonksiyonlarını global'e ekleyelim (resetAll kullanacak)
-_G.StopLaserVignette = StopLaserVignette
-_G.StopLaserShake = StopLaserShake
 
-print("Parça 4 Güncellendi - Vignette/Shake temizleme fonksiyonları global'e eklendi")-- ========== PARÇA 5: GUI VE BUTONLAR (RANDOM MESAJ MENÜSÜ + LAZER RENK SEÇENEKLERİ + FLOATING) ==========
+print("Parça 4 Yüklendi - Lazer, GOD DAMN IT!, Vignette, Güçlü Sürekli Shake (0.35)")-- ========== PARÇA 5: GUI VE BUTONLAR (RANDOM MESAJ MENÜSÜ + LAZER RENK SEÇENEKLERİ + FLOATING) ==========
 local shared = _G.HomelanderShared
 if not shared then
     warn("Lütfen önce Parça 1-4'ü çalıştırın!")
@@ -1356,7 +1380,8 @@ local function createLaserSettingsMenu(parent)
 		shared.updateLaserSettings("offsetX", val)
 		xLabel.Text = string.format("X: %.3f", shared.laserSettings.offsetX)
 	end)
-	local yLabel = createValueLabel(menuFrame, "Y: 0.050", 10, 80)
+
+		local yLabel = createValueLabel(menuFrame, "Y: 0.050", 10, 80)
 	createControlButton(menuFrame, "▲", 100, 80, 30, 30, function()
 		local val = shared.laserSettings.offsetY + 0.025
 		shared.updateLaserSettings("offsetY", val)
@@ -1609,7 +1634,6 @@ local function createGUI()
 		updateButtonStates()
 	end)
 
-	-- FLYIDLE VERSİYONLARI (V10)
 	local flyIdleVersions = { "V1","V2","V3","V4","V5","V6","V7","V8","V9","V10" }
 	local flyIdleVersionIndex = 1
 	flyIdleState.btn.MouseButton1Click:Connect(function()
@@ -1673,7 +1697,7 @@ local function createGUI()
 	return screenGui, btnContainer, settingsMenu, laserSettingsMenu
 end
 
-print("Parça 5 Yüklendi - GUI (Random mesaj menüsü + Lazer renk seçenekleri + Floating + Yeni FlyIdle V10)")-- ========== PARÇA 6: KARAKTER YÜKLEME VE ANA DÖNGÜ (GÜNCELLENDİ) ==========
+print("Parça 5 Yüklendi - GUI (Random mesaj menüsü + Lazer renk seçenekleri + Floating + Yeni FlyIdle V10 eklendi)")-- ========== PARÇA 6: KARAKTER YÜKLEME VE ANA DÖNGÜ ==========
 local shared = _G.HomelanderShared
 if not shared then warn("Önceki parçaları çalıştırın!") return end
 
@@ -1688,14 +1712,7 @@ local function resetAll()
 		if bodyVelocity then bodyVelocity:Destroy(); bodyVelocity = nil end
 		if bodyGyro then bodyGyro:Destroy(); bodyGyro = nil end
 	end
-	if shared.laserActive then 
-		shared.laserActive = false
-		if shared.stopLaserSound then shared.stopLaserSound() end
-		-- Vignette ve Shake'i kapat
-		if _G.StopLaserVignette then _G.StopLaserVignette() end
-		if _G.StopLaserShake then _G.StopLaserShake() end
-		shared.destroyLaserObjects()
-	end
+	if shared.laserActive then shared.laserActive = false; if shared.stopLaserSound then shared.stopLaserSound() end end
 	shared.laserCurrentDistance = 0
 	shared.currentTrack = nil; shared.currentType = nil
 	shared.normalSpeedAcceleration = false; shared.normalSpeedCurrent = 40
@@ -1721,11 +1738,6 @@ local function resetAll()
 		end
 		supeLabels = {}
 	end
-	-- Varsayılan zıplama/düşme durumlarını geri aç
-	if humanoid then
-		humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
-		humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
-	end
 end
 
 local function loadAnimations(char)
@@ -1745,7 +1757,7 @@ local function loadAnimations(char)
 			local animObj = Instance.new("Animation")
 			animObj.AnimationId = animId
 			local track = animator:LoadAnimation(animObj)
-			track.Priority = Enum.AnimationPriority.Action4  -- yüksek öncelik
+			track.Priority = Enum.AnimationPriority.Action4
 			shared.tracks[animType][i] = track
 		end
 	end
@@ -1863,10 +1875,10 @@ player.CharacterRemoving:Connect(function()
 	character = nil; humanoid = nil; animator = nil; rootPart = nil
 end)
 
-print("Parça 6 Güncellendi - resetAll'de vignette/shake temizleme, SetStateEnabled kullanımı, TimePosition koruma")
-print("=== TÜM SORUNLAR GİDERİLDİ ===")
+print("Parça 6 Yüklendi - Karakter yükleme ve ana döngü (Landing lazer kontrolü eklendi)")
+print("=== HOMELANDER SİSTEMİ TAMAMEN YÜKLENDİ (Fly crossfade 0.3, Landing 1.5x, FlyIdle koruma) ===")
 
--- NDS özel (değişmedi)
+-- NDS özel
 local pid = game.PlaceId
 if pid ~= 189707 then
     print("Error not found natural disasters survival game!")
