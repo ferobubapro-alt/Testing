@@ -43,9 +43,7 @@ _G.HomelanderShared.settings = {
 	laserFlingEnabled = true,
 	laserIdleEnabled = true,
 	shoulderCamera = false,
-	cameraOffset = 0,
-	takeoffCutsceneMode = 2,
-	cameraStyle = "Random",
+	takeoffMode = 2,  -- 0=kapalı, 1=sadece ses, 2=kameralı
 }
 
 _G.HomelanderShared.laserSettings = {
@@ -99,9 +97,8 @@ getgenv().FPDH = workspace.FallenPartsDestroyHeight
 
 _G.HomelanderShared.takeoffPlaying = false
 _G.HomelanderShared.takeoffSound = nil
-_G.HomelanderShared.cutsceneIndex = 0
 
-print("Parça 1 Yüklendi")-- ========== PARÇA 2: FLING MOTORU ==========
+print("Parça 1 Yüklendi - Değişkenler ve ayarlar (takeoffMode eklendi)")-- ========== PARÇA 2: FLING MOTORU ==========
 function _G.HomelanderShared.SkidFling(TargetPlayer)
     local Character = player.Character
     local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
@@ -184,7 +181,7 @@ runService.RenderStepped:Connect(function()
     end
 end)
 
-print("Parça 2 Yüklendi")-- ========== PARÇA 3: ANİMASYON, UÇUŞ, KAMERA, LANDING ==========
+print("Parça 2 Yüklendi - Fling motoru")-- ========== PARÇA 3: ANİMASYON, UÇUŞ, KAMERA, LANDING, CUTSCENE ==========
 local shared = _G.HomelanderShared
 if not shared then warn("Parça 1'i çalıştırın!") return end
 
@@ -202,8 +199,8 @@ local bubbleCoroutine = nil
 -- Cutscene değişkenleri
 local takeoffCutsceneConnection = nil
 local takeoffFOVTween = nil
+local currentCutsceneType = nil
 local cutsceneStartTime = 0
-local currentCutsceneIndex = 0
 
 -- LAZER RENK FONKSİYONU
 local function getLaserColors()
@@ -382,8 +379,7 @@ local function updateCamera(dt)
 		shared.shakeTime = 0
 	end
 	if shared.settings.shoulderCamera then
-		local cameraOffset = shared.settings.cameraOffset or 0
-		local shoulderOffset = Vector3.new(3.2 + cameraOffset, 1.3, -1.8)
+		local shoulderOffset = Vector3.new(3.2, 1.3, -1.8)
 		camera.CFrame = camera.CFrame * CFrame.new(shoulderOffset)
 	end
 end
@@ -419,56 +415,55 @@ end
 -- ===== CUTSCENE FONKSİYONLARI =====
 local function applyCutscene(dt)
 	if not rootPart or not camera then return end
-	if shared.settings.takeoffCutsceneMode ~= 2 then return end
-
 	local pos = rootPart.Position
 	local look = rootPart.CFrame.LookVector
 	local up = Vector3.new(0,1,0)
 	local right = rootPart.CFrame.RightVector
-	local elapsed = tick() - cutsceneStartTime
 
-	if currentCutsceneIndex == 0 then
-		if elapsed < 1 then
-			local offset = pos + look * 5 + Vector3.new(0, 1, 0)
-			camera.CFrame = CFrame.lookAt(offset, pos)
-		elseif elapsed < 2.5 then
+	if currentCutsceneType == "Front" then
+		local offset = pos + look * 9 + Vector3.new(0, 1, 0)
+		camera.CFrame = CFrame.lookAt(offset, pos)
+	elseif currentCutsceneType == "Overhead" then
+		local offset = pos + Vector3.new(0, 10, 0)
+		camera.CFrame = CFrame.lookAt(offset, pos)
+	elseif currentCutsceneType == "Right" then
+		local offset = pos + (-look + right) * 45 + Vector3.new(0, 3, 0)
+		camera.CFrame = CFrame.lookAt(offset, pos)
+	elseif currentCutsceneType == "Rear" then
+		local offset = pos - look * 12 + Vector3.new(0, 2, 0)
+		camera.CFrame = CFrame.lookAt(offset, pos)
+	elseif currentCutsceneType == "Orbit" then
+		local elapsed = tick() - cutsceneStartTime
+		local angle = math.rad(elapsed * 30)
+		local radius = 12
+		local offset = pos + Vector3.new(math.sin(angle) * radius, 2, math.cos(angle) * radius)
+		camera.CFrame = CFrame.lookAt(offset, pos)
+	elseif currentCutsceneType == "RearToFace" then
+		local elapsed = tick() - cutsceneStartTime
+		local totalDuration = 3
+		local half = totalDuration / 2
+		if elapsed < half then
 			local offset = pos - look * 10 + Vector3.new(0, 2, 0)
 			camera.CFrame = CFrame.lookAt(offset, pos)
 		else
-			local offset = pos + Vector3.new(0, 3, 0) + look * 1.5
+			local offset = pos + look * 1.5 + Vector3.new(0, 1.5, 0)
 			camera.CFrame = CFrame.lookAt(offset, pos)
 		end
-	elseif currentCutsceneIndex == 1 then
-		if elapsed < 1 then
-			local offset = pos + look * 9 + Vector3.new(0, 1, 0)
-			camera.CFrame = CFrame.lookAt(offset, pos)
-		elseif elapsed < 1.75 then
-			local offset = pos - look * 40 + right * 30 + Vector3.new(0, 3, 0)
-			camera.CFrame = CFrame.lookAt(offset, pos)
-		elseif elapsed < 4.75 then
-			local progress = (elapsed - 1.75) / 3
-			local angle = math.rad(progress * 180)
-			local radius = 50
-			local offset = pos + Vector3.new(math.sin(angle) * radius, 2 + progress * 5, math.cos(angle) * radius)
-			camera.CFrame = CFrame.lookAt(offset, pos)
-		end
-	elseif currentCutsceneIndex == 2 then
-		if elapsed < 1.75 then
-			local offset = pos - look * 7 + Vector3.new(0, 10, 0)
-			camera.CFrame = CFrame.lookAt(offset, pos)
-		else
-			local offset = pos - look * 12 + Vector3.new(0, 3, 0)
-			camera.CFrame = CFrame.lookAt(offset, pos)
-		end
+	else
+		local offset = pos + look * 9 + Vector3.new(0, 1, 0)
+		camera.CFrame = CFrame.lookAt(offset, pos)
 	end
 end
 
 local function startCutscene()
 	if takeoffCutsceneConnection then takeoffCutsceneConnection:Disconnect() end
-	
-	currentCutsceneIndex = shared.cutsceneIndex or 0
-	shared.cutsceneIndex = (shared.cutsceneIndex + 1) % 3
-	
+	local style = shared.settings.cameraStyle or "Random"
+	if style == "Random" then
+		local scenes = {"Front", "Overhead", "Right", "Rear", "Orbit", "RearToFace"}
+		currentCutsceneType = scenes[math.random(1, #scenes)]
+	else
+		currentCutsceneType = style
+	end
 	cutsceneStartTime = tick()
 	takeoffCutsceneConnection = runService.RenderStepped:Connect(function(dt)
 		if not shared.takeoffPlaying then
@@ -487,34 +482,16 @@ local function stopCutscene()
 	end
 end
 
--- ===== START FLY =====
+-- ===== START FLY (3 MODLU TAKEOFF) =====
 local function startFly()
 	if shared.flying then return end
-	if not humanoid or not rootPart then return end
-
-	if humanoid.FloorMaterial == Enum.Material.Air or shared.floating then
-		shared.flying = true
-		updateSpeed()
-		updateCollision()
-		bodyVelocity = Instance.new("BodyVelocity")
-		bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
-		bodyVelocity.Velocity = Vector3.zero
-		bodyVelocity.Parent = rootPart
-		bodyGyro = Instance.new("BodyGyro")
-		bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-		bodyGyro.P, bodyGyro.D = 100000, 1000
-		bodyGyro.Parent = rootPart
-		if shared.settings.cameraFollow then
-			local look, up = camera.CFrame.LookVector, camera.CFrame.UpVector
-			bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + look, up)
-		end
-		local moving = humanoid.MoveDirection.Magnitude > 0.1
-		if moving then playAnimation("Fly", shared.currentIndices.Fly)
-		else playAnimation("FlyIdle", shared.currentIndices.FlyIdle) end
-		return
+	if not shared.tracks.Fly[1] and reloadAnimationsCallback and character then
+		reloadAnimationsCallback(character)
 	end
 
-	local mode = shared.settings.takeoffCutsceneMode
+	local mode = shared.settings.takeoffMode or 2
+
+	-- Mod 0: Takeoff kapalı, direkt uçuş
 	if mode == 0 then
 		shared.flying = true
 		updateSpeed()
@@ -537,11 +514,7 @@ local function startFly()
 		return
 	end
 
-	local oldCameraFollow = shared.settings.cameraFollow
-	if oldCameraFollow then
-		shared.settings.cameraFollow = false
-	end
-
+	-- Mod 1 veya 2: Takeoff başlat
 	local sound = Instance.new("Sound")
 	sound.SoundId = "rbxassetid://139473062598949"
 	sound.Volume = 1
@@ -550,110 +523,126 @@ local function startFly()
 	sound:Play()
 	shared.takeoffSound = sound
 
-	task.wait(1)
+	task.wait(1)  -- 1 saniye ses
 
-	shared.takeoffPlaying = true
+	local oldCameraFollow = shared.settings.cameraFollow
 
 	if mode == 2 then
+		-- Mod 2: Kameralı cutscene
+		if oldCameraFollow then
+			shared.settings.cameraFollow = false
+		end
+		shared.takeoffPlaying = true
 		local frontPos = rootPart.Position + rootPart.CFrame.LookVector * 10 + Vector3.new(0, 1, 0)
 		camera.CFrame = CFrame.lookAt(frontPos, rootPart.Position)
 		startCutscene()
-	end
-
-	playAnimation("Emote", 1)
-	
-	task.delay(0.60, function()
-		if shared.takeoffSound and shared.takeoffSound.IsPlaying then
-			shared.takeoffSound:Play()
+		playAnimation("Emote", 1)
+		task.wait(0.75)
+		playAnimation("Fly", 1)
+		if not bodyVelocity then
+			bodyVelocity = Instance.new("BodyVelocity")
+			bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+			bodyVelocity.Velocity = Vector3.zero
+			bodyVelocity.Parent = rootPart
 		end
-	end)
-	
-	task.wait(0.80)
-
-	playAnimation("Fly", 1)
-
-	if not bodyVelocity then
+		if not bodyGyro then
+			bodyGyro = Instance.new("BodyGyro")
+			bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+			bodyGyro.P, bodyGyro.D = 100000, 1000
+			bodyGyro.Parent = rootPart
+		end
+		bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + Vector3.new(0, 1, 0))
+		tweenFOV(70, 85, 0.25)
+		local startTime = tick()
+		local rampDuration = 3
+		local startVel = 0
+		local targetVel = 800
+		local rampConnection
+		rampConnection = runService.RenderStepped:Connect(function(dt)
+			local elapsed = tick() - startTime
+			local alpha = math.min(elapsed / rampDuration, 1)
+			local smoothAlpha = alpha * alpha * (3 - 2 * alpha)
+			local currentVel = startVel + (targetVel - startVel) * smoothAlpha
+			bodyVelocity.Velocity = Vector3.new(0, currentVel, 0)
+			if alpha >= 1 then
+				rampConnection:Disconnect()
+				bodyVelocity.Velocity = Vector3.new(0, targetVel, 0)
+			end
+		end)
+		task.wait(rampDuration)
+		tweenFOV(85, 70, 0.25)
+		stopCutscene()
+		if shared.takeoffSound and shared.takeoffSound.IsPlaying then
+			task.wait(shared.takeoffSound.TimeLength - shared.takeoffSound.TimePosition)
+		end
+		if shared.takeoffSound then
+			shared.takeoffSound:Stop()
+			shared.takeoffSound:Destroy()
+			shared.takeoffSound = nil
+		end
+		shared.takeoffPlaying = false
+		shared.flying = true
+		updateSpeed()
+		updateCollision()
+		bodyVelocity.Velocity = Vector3.zero
+		shared.settings.cameraFollow = oldCameraFollow
+		if oldCameraFollow then
+			local look, up = camera.CFrame.LookVector, camera.CFrame.UpVector
+			bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + look, up)
+		else
+			local look = rootPart.CFrame.LookVector
+			bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + look)
+		end
+	else
+		-- Mod 1: Sadece ses, kamera yok
+		shared.flying = true
+		updateSpeed()
+		updateCollision()
 		bodyVelocity = Instance.new("BodyVelocity")
 		bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
 		bodyVelocity.Velocity = Vector3.zero
 		bodyVelocity.Parent = rootPart
-	end
-	if not bodyGyro then
 		bodyGyro = Instance.new("BodyGyro")
 		bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
 		bodyGyro.P, bodyGyro.D = 100000, 1000
 		bodyGyro.Parent = rootPart
-	end
-
-	local currentLook = rootPart.CFrame.LookVector
-	local flatLook = Vector3.new(currentLook.X, 0, currentLook.Z)
-	if flatLook.Magnitude > 0.001 then
-		flatLook = flatLook.Unit
-	else
-		flatLook = Vector3.new(0, 0, -1)
-	end
-	bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + flatLook, Vector3.new(0, 1, 0))
-
-	tweenFOV(70, 85, 0.25)
-
-	local startTime = tick()
-	local rampDuration = 3
-	local startVel = 0
-	local targetVel = 800
-	local rampConnection
-	rampConnection = runService.RenderStepped:Connect(function(dt)
-		local elapsed = tick() - startTime
-		local alpha = math.min(elapsed / rampDuration, 1)
-		local smoothAlpha = alpha * alpha * (3 - 2 * alpha)
-		local currentVel = startVel + (targetVel - startVel) * smoothAlpha
-		bodyVelocity.Velocity = Vector3.new(0, currentVel, 0)
-		if alpha >= 1 then
-			rampConnection:Disconnect()
-			bodyVelocity.Velocity = Vector3.new(0, targetVel, 0)
+		if shared.settings.cameraFollow then
+			local look, up = camera.CFrame.LookVector, camera.CFrame.UpVector
+			bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + look, up)
 		end
-	end)
-
-	task.wait(rampDuration)
-
-	tweenFOV(85, 70, 0.25)
-
-	if mode == 2 then
-		stopCutscene()
-	end
-
-	if shared.takeoffSound and shared.takeoffSound.IsPlaying then
-		task.wait(shared.takeoffSound.TimeLength - shared.takeoffSound.TimePosition)
-	end
-
-	if shared.takeoffSound then
-		shared.takeoffSound:Stop()
-		shared.takeoffSound:Destroy()
-		shared.takeoffSound = nil
-	end
-
-	local currentLook2 = rootPart.CFrame.LookVector
-	local flatLook2 = Vector3.new(currentLook2.X, 0, currentLook2.Z)
-	if flatLook2.Magnitude > 0.001 then
-		flatLook2 = flatLook2.Unit
-	else
-		flatLook2 = Vector3.new(0, 0, -1)
-	end
-	bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + flatLook2, Vector3.new(0, 1, 0))
-
-	shared.takeoffPlaying = false
-	shared.flying = true
-	updateSpeed()
-	updateCollision()
-	bodyVelocity.Velocity = Vector3.zero
-
-	shared.settings.cameraFollow = oldCameraFollow
-	if oldCameraFollow then
-		local look, up = camera.CFrame.LookVector, camera.CFrame.UpVector
-		bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + look, up)
+		playAnimation("Fly", 1)
+		local startTime = tick()
+		local rampDuration = 3
+		local startVel = 0
+		local targetVel = 800
+		local rampConnection
+		rampConnection = runService.RenderStepped:Connect(function(dt)
+			local elapsed = tick() - startTime
+			local alpha = math.min(elapsed / rampDuration, 1)
+			local smoothAlpha = alpha * alpha * (3 - 2 * alpha)
+			local currentVel = startVel + (targetVel - startVel) * smoothAlpha
+			bodyVelocity.Velocity = Vector3.new(0, currentVel, 0)
+			if alpha >= 1 then
+				rampConnection:Disconnect()
+				bodyVelocity.Velocity = Vector3.new(0, targetVel, 0)
+			end
+		end)
+		task.wait(rampDuration)
+		bodyVelocity.Velocity = Vector3.zero
+		if shared.takeoffSound and shared.takeoffSound.IsPlaying then
+			task.wait(shared.takeoffSound.TimeLength - shared.takeoffSound.TimePosition)
+		end
+		if shared.takeoffSound then
+			shared.takeoffSound:Stop()
+			shared.takeoffSound:Destroy()
+			shared.takeoffSound = nil
+		end
+		shared.flying = true
+		updateSpeed()
+		updateCollision()
 	end
 end
 
--- ===== FLOATING, LANDING, LASER BEAM, DESTROY =====
 local function startFloating()
 	if shared.floating then return end
 	if not shared.tracks.FlyIdle[1] and reloadAnimationsCallback and character then
@@ -699,7 +688,6 @@ local function stopFly(noCrossfade)
 		stopCurrentTrack()
 	end
 	updateIdleState()
-
 	if shared.takeoffSound then
 		shared.takeoffSound:Stop()
 		shared.takeoffSound:Destroy()
@@ -753,7 +741,7 @@ local function performLanding()
 		landingBodyVelocity.Velocity = Vector3.new(0, 0, 0)
 		landingBodyVelocity.Parent = rootPart
 	end
-	local landingTrack = nil
+		local landingTrack = nil
 	if shared.tracks.Landing and shared.tracks.Landing[1] then
 		landingTrack = shared.tracks.Landing[1]
 		landingTrack:Play(0)
@@ -786,8 +774,6 @@ local function performLanding()
 	shared.landingPosition = nil
 	updateSpeed()
 end
-
--- ===== LAZER BEAM FONKSİYONLARI =====
 local function createLaserBeams(offset)
 	local head = character and character:FindFirstChild("Head")
 	if not head then return nil end
@@ -847,7 +833,6 @@ local function destroyLaserObjects()
 	end
 end
 
--- ===== EXPORT =====
 shared.stopFly = stopFly
 shared.startFly = startFly
 shared.startFloating = startFloating
@@ -862,13 +847,16 @@ shared.updateCamera = updateCamera
 shared.setReloadCallback = function(cb) reloadAnimationsCallback = cb end
 shared.destroyLaserObjects = destroyLaserObjects
 
-print("Parça 3 Yüklendi")-- ========== PARÇA 4: LAZER SİSTEMİ ==========
+print("Parça 3 Yüklendi - Animasyon, uçuş, kamera, landing, cutscene (3 modlu takeoff)")-- ========== PARÇA 4: LAZER SİSTEMİ ==========
 local shared = _G.HomelanderShared
 if not shared then warn("Parça 1-3'ü çalıştırın!") return end
 
 local TweenService = game:GetService("TweenService")
 
-local LASER_SOUND_ID = "rbxassetid://114537309582892"
+-- LAZER SESLERİ
+local LASER_START_SOUND_ID = "rbxassetid://79016124077522"
+local LASER_LOOP_SOUND_ID = "rbxassetid://121549896249098"
+local LASER_END_SOUND_ID = "rbxassetid://75551379006890"
 
 local vignetteGui
 local vignetteImage
@@ -876,8 +864,6 @@ local vignetteTween
 local laserShakeConnection = nil
 local laserLoopConnection = nil
 local laserSound = nil
-local laserSoundAlt = nil
-local isCrossfading = false
 
 local function CreateGodBubble(text, offset)
 	local billboard = Instance.new("BillboardGui")
@@ -950,13 +936,11 @@ end
 
 local function StartLaserVignette()
 	if vignetteGui then return end
-
 	vignetteGui = Instance.new("ScreenGui")
 	vignetteGui.Name = "LaserVignette"
 	vignetteGui.IgnoreGuiInset = true
 	vignetteGui.ResetOnSpawn = false
 	vignetteGui.Parent = player:WaitForChild("PlayerGui")
-
 	vignetteImage = Instance.new("ImageLabel")
 	vignetteImage.Size = UDim2.fromScale(1, 1)
 	vignetteImage.Position = UDim2.fromScale(0, 0)
@@ -965,7 +949,6 @@ local function StartLaserVignette()
 	vignetteImage.ImageColor3 = Color3.fromRGB(255, 0, 0)
 	vignetteImage.ImageTransparency = 0.35
 	vignetteImage.Parent = vignetteGui
-
 	vignetteTween = task.spawn(function()
 		while shared.laserActive and vignetteImage do
 			TweenService:Create(vignetteImage, TweenInfo.new(0.8, Enum.EasingStyle.Sine), {ImageTransparency = 0.25}):Play()
@@ -994,7 +977,6 @@ local function StartLaserShake()
 	if laserShakeConnection then return end
 	local cam = workspace.CurrentCamera
 	if not cam then return end
-
 	laserShakeConnection = runService.RenderStepped:Connect(function()
 		if not shared.laserActive or not cam then
 			StopLaserShake()
@@ -1014,110 +996,77 @@ local function StopLaserShake()
 	end
 end
 
--- ===== LAZER SES FONKSİYONLARI (CROSSFADE'Lİ LOOP) =====
 local function startLaserSound()
-    if laserSound then laserSound:Stop(); laserSound:Destroy(); laserSound = nil end
-    if laserSoundAlt then laserSoundAlt:Stop(); laserSoundAlt:Destroy(); laserSoundAlt = nil end
-    if laserLoopConnection then laserLoopConnection:Disconnect(); laserLoopConnection = nil end
-    isCrossfading = false
-    
-    local head = character and character:FindFirstChild("Head") or character
-    if not head then return end
-    
-    laserSound = Instance.new("Sound")
-    laserSound.SoundId = LASER_SOUND_ID
-    laserSound.Volume = 1
-    laserSound.Looped = false
-    laserSound.Parent = head
-    laserSound.TimePosition = 0
-    laserSound:Play()
-    
-    task.wait(0.80)
-    
-    if laserSound and shared.laserActive then
-        laserSound.TimePosition = 0.80
-        laserSound:Play()
-        
-        laserSoundAlt = Instance.new("Sound")
-        laserSoundAlt.SoundId = LASER_SOUND_ID
-        laserSoundAlt.Volume = 0
-        laserSoundAlt.Looped = false
-        laserSoundAlt.Parent = head
-        laserSoundAlt.TimePosition = 0.80
-        laserSoundAlt:Play()
-        
-        laserLoopConnection = runService.RenderStepped:Connect(function()
-            if not laserSound or not shared.laserActive then
-                if laserLoopConnection then laserLoopConnection:Disconnect(); laserLoopConnection = nil end
-                return
-            end
-            
-            local currentTime = laserSound.TimePosition
-            
-            if currentTime >= 1.70 and not isCrossfading then
-                isCrossfading = true
-                
-                if laserSoundAlt then
-                    laserSoundAlt.TimePosition = 0.80
-                    laserSoundAlt:Play()
-                end
-                
-                local tweenInfo = TweenInfo.new(0.14, Enum.EasingStyle.Linear)
-                local tween1 = TweenService:Create(laserSound, tweenInfo, {Volume = 0})
-                local tween2 = TweenService:Create(laserSoundAlt, tweenInfo, {Volume = 1})
-                
-                tween1:Play()
-                tween2:Play()
-                
-                tween1.Completed:Connect(function()
-                    if laserSound and laserSoundAlt then
-                        laserSound:Stop()
-                        laserSound:Destroy()
-                        laserSound = laserSoundAlt
-                        laserSoundAlt = nil
-                        isCrossfading = false
-                        
-                        local head2 = character and character:FindFirstChild("Head") or character
-                        if head2 and shared.laserActive then
-                            laserSoundAlt = Instance.new("Sound")
-                            laserSoundAlt.SoundId = LASER_SOUND_ID
-                            laserSoundAlt.Volume = 0
-                            laserSoundAlt.Looped = false
-                            laserSoundAlt.Parent = head2
-                            laserSoundAlt.TimePosition = 0.80
-                            laserSoundAlt:Play()
-                        end
-                    end
-                end)
-            end
-        end)
-    end
-end
-
-local function stopLaserSound()
-    if laserLoopConnection then laserLoopConnection:Disconnect(); laserLoopConnection = nil end
     if laserSound then
         laserSound:Stop()
         laserSound:Destroy()
         laserSound = nil
     end
-    if laserSoundAlt then
-        laserSoundAlt:Stop()
-        laserSoundAlt:Destroy()
-        laserSoundAlt = nil
+    if laserLoopConnection then
+        laserLoopConnection:Disconnect()
+        laserLoopConnection = nil
     end
-    isCrossfading = false
-    
+
+    local head = character and character:FindFirstChild("Head") or character
+    if not head then return end
+
+    local startSound = Instance.new("Sound")
+    startSound.SoundId = LASER_START_SOUND_ID
+    startSound.Volume = 1
+    startSound.Looped = false
+    startSound.Parent = head
+    startSound:Play()
+
+    startSound.Ended:Connect(function()
+        startSound:Destroy()
+        if not shared.laserActive then return end
+        
+        laserSound = Instance.new("Sound")
+        laserSound.SoundId = LASER_LOOP_SOUND_ID
+        laserSound.Volume = 0.8
+        laserSound.Looped = true
+        laserSound.Parent = head
+        laserSound:Play()
+    end)
+
+    task.delay(3, function()
+        if startSound and startSound.IsPlaying then
+            startSound:Stop()
+            startSound:Destroy()
+            if shared.laserActive and not laserSound then
+                laserSound = Instance.new("Sound")
+                laserSound.SoundId = LASER_LOOP_SOUND_ID
+                laserSound.Volume = 0.8
+                laserSound.Looped = true
+                laserSound.Parent = head
+                laserSound:Play()
+            end
+        end
+    end)
+end
+
+local function stopLaserSound()
+    if laserSound then
+        laserSound:Stop()
+        laserSound:Destroy()
+        laserSound = nil
+    end
+    if laserLoopConnection then
+        laserLoopConnection:Disconnect()
+        laserLoopConnection = nil
+    end
+
     local head = character and character:FindFirstChild("Head") or character
     if head then
         local endSound = Instance.new("Sound")
-        endSound.SoundId = LASER_SOUND_ID
+        endSound.SoundId = LASER_END_SOUND_ID
         endSound.Volume = 1
         endSound.Looped = false
-        endSound.TimePosition = 2.70
         endSound.Parent = head
         endSound:Play()
-        endSound.Ended:Connect(function() endSound:Destroy() end)
+        endSound.Ended:Connect(function()
+            endSound:Destroy()
+        end)
     end
 end
 
@@ -1200,7 +1149,7 @@ shared.toggleLaser = toggleLaser
 shared.updateLaser = updateLaser
 shared.stopLaserSound = stopLaserSound
 
-print("Parça 4 Yüklendi (Crossfade'li loop: 1.70-1.84 arası geçiş)")-- ========== PARÇA 5: GUI VE BUTONLAR ==========
+print("Parça 4 Yüklendi - Lazer sistemi (start/loop/end sesli)")-- ========== PARÇA 5: GUI VE BUTONLAR ==========
 local shared = _G.HomelanderShared
 if not shared then
     warn("Lütfen önce Parça 1-4'ü çalıştırın!")
@@ -1331,7 +1280,6 @@ local function makeDraggable(guiObject)
 	end)
 end
 
--- ===== QUOTE MENÜSÜ =====
 local function CreateQuoteMenu(parent)
 	local menuFrame = Instance.new("Frame")
 	menuFrame.Name = "QuoteMenu"
@@ -1599,8 +1547,8 @@ end
 local function createSettingsMenu(parent)
 	local menuFrame = Instance.new("Frame")
 	menuFrame.Name = "SettingsMenu"
-	menuFrame.Size = UDim2.new(0, 250, 0, 550)
-	menuFrame.Position = UDim2.new(0.5, -125, 0.5, -275)
+	menuFrame.Size = UDim2.new(0, 250, 0, 490)
+	menuFrame.Position = UDim2.new(0.5, -125, 0.5, -245)
 	menuFrame.BackgroundColor3 = Color3.new(0.1,0.1,0.15)
 	menuFrame.BackgroundTransparency = 0.1
 	menuFrame.BorderSizePixel = 0
@@ -1631,31 +1579,6 @@ local function createSettingsMenu(parent)
 		updateText()
 		btn.MouseButton1Click:Connect(function() setValue(); updateText() end)
 	end
-
-	-- Takeoff Cutscene Mode (3 modlu)
-	local function getModeText()
-		local mode = shared.settings.takeoffCutsceneMode or 0
-		if mode == 0 then return "OFF"
-		elseif mode == 1 then return "Emote Only"
-		else return "Full" end
-	end
-	local modeBtn = Instance.new("TextButton")
-	modeBtn.Size = UDim2.new(0.9,0,0,40)
-	modeBtn.Position = UDim2.new(0.05,0,0,500)
-	modeBtn.Text = "🎬 Takeoff: " .. getModeText()
-	modeBtn.TextColor3 = Color3.new(1,1,1)
-	modeBtn.TextScaled = true
-	modeBtn.BackgroundColor3 = Color3.new(0.2,0.2,0.3)
-	modeBtn.BackgroundTransparency = 0.3
-	modeBtn.BorderSizePixel = 0
-	modeBtn.Parent = menuFrame
-	local mCorner = Instance.new("UICorner"); mCorner.CornerRadius = UDim.new(0,4); mCorner.Parent = modeBtn
-	modeBtn.MouseButton1Click:Connect(function()
-		local mode = shared.settings.takeoffCutsceneMode or 0
-		mode = (mode + 1) % 3
-		shared.settings.takeoffCutsceneMode = mode
-		modeBtn.Text = "🎬 Takeoff: " .. getModeText()
-	end)
 	
 	createOption(menuFrame, "🎯 Camera Follow", 50, function() return shared.settings.cameraFollow and "ON" or "OFF" end, function() shared.settings.cameraFollow = not shared.settings.cameraFollow if (shared.flying or shared.floating) and shared.settings.cameraFollow and bodyGyro then bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + camera.CFrame.LookVector) end end)
 	createOption(menuFrame, "⚡ Speed Mode", 100, function() return shared.settings.speedMode end, function() local modes = { "Slow", "Normal", "Fast" } local cur = 1 for i,m in ipairs(modes) do if m == shared.settings.speedMode then cur = i end end shared.settings.speedMode = modes[cur % 3 + 1]; if not shared.floating then updateSpeed() end end)
@@ -1665,6 +1588,19 @@ local function createSettingsMenu(parent)
 	createOption(menuFrame, "💡 Laser Idle", 300, function() return shared.settings.laserIdleEnabled and "ON" or "OFF" end, function() shared.settings.laserIdleEnabled = not shared.settings.laserIdleEnabled; if shared.laserActive then shared.updateIdleState() end end)
 	createOption(menuFrame, "📷 Shoulder Camera", 350, function() return shared.settings.shoulderCamera and "ON" or "OFF" end, function() shared.settings.shoulderCamera = not shared.settings.shoulderCamera end)
 	createOption(menuFrame, "🔒 Lock Buttons", 400, function() return shared.settings.buttonsLocked and "ON" or "OFF" end, function() shared.settings.buttonsLocked = not shared.settings.buttonsLocked end)
+	createOption(menuFrame, "🎬 Takeoff Mode", 450, 
+		function()
+			local mode = shared.settings.takeoffMode or 2
+			if mode == 0 then return "Kapalı"
+			elseif mode == 1 then return "Sadece Ses"
+			else return "Kameralı" end
+		end,
+		function()
+			local mode = shared.settings.takeoffMode or 2
+			mode = (mode + 1) % 3
+			shared.settings.takeoffMode = mode
+		end
+	)
 	
 	local closeBtn = Instance.new("TextButton")
 	closeBtn.Size = UDim2.new(0,30,0,30)
@@ -1684,8 +1620,8 @@ end
 local function createLaserSettingsMenu(parent)
 	local menuFrame = Instance.new("Frame")
 	menuFrame.Name = "LaserSettingsMenu"
-	menuFrame.Size = UDim2.new(0, 220, 0, 420)
-	menuFrame.Position = UDim2.new(0.5, -110, 0.5, -210)
+	menuFrame.Size = UDim2.new(0, 220, 0, 380)
+	menuFrame.Position = UDim2.new(0.5, -110, 0.5, -190)
 	menuFrame.BackgroundColor3 = Color3.new(0.1,0.1,0.15)
 	menuFrame.BackgroundTransparency = 0.1
 	menuFrame.BorderSizePixel = 0
@@ -1731,7 +1667,7 @@ local function createLaserSettingsMenu(parent)
 		return label
 	end
 
-	local xLabel = createValueLabel(menuFrame, "X: 0.225", 10, 40)
+		local xLabel = createValueLabel(menuFrame, "X: 0.225", 10, 40)
 	createControlButton(menuFrame, "◄", 80, 40, 30, 30, function()
 		local val = shared.laserSettings.offsetX - 0.025
 		shared.updateLaserSettings("offsetX", val)
@@ -1856,34 +1792,6 @@ local function createLaserSettingsMenu(parent)
 	end)
 
 	updatePresetButtons()
-
-	-- CAMERA OFFSET
-	local offsetLabel = Instance.new("TextLabel")
-	offsetLabel.Size = UDim2.new(1, 0, 0, 20)
-	offsetLabel.Position = UDim2.new(0, 0, 0, 335)
-	offsetLabel.Text = "📷 Camera Offset"
-	offsetLabel.TextColor3 = Color3.new(1,1,1)
-	offsetLabel.TextScaled = true
-	offsetLabel.BackgroundTransparency = 1
-	offsetLabel.Parent = menuFrame
-
-	local offsetValueLabel = createValueLabel(menuFrame, "0.0", 10, 360)
-	offsetValueLabel.Size = UDim2.new(0, 60, 0, 25)
-	offsetValueLabel.Position = UDim2.new(0.1, 0, 0, 360)
-
-	local function updateOffsetLabel()
-		offsetValueLabel.Text = string.format("%.1f", shared.settings.cameraOffset or 0)
-	end
-	updateOffsetLabel()
-
-	createControlButton(menuFrame, "◄", 80, 360, 30, 30, function()
-		shared.settings.cameraOffset = (shared.settings.cameraOffset or 0) - 0.1
-		updateOffsetLabel()
-	end)
-	createControlButton(menuFrame, "►", 120, 360, 30, 30, function()
-		shared.settings.cameraOffset = (shared.settings.cameraOffset or 0) + 0.1
-		updateOffsetLabel()
-	end)
 
 	local closeBtn = Instance.new("TextButton")
 	closeBtn.Size = UDim2.new(0, 25, 0, 25)
@@ -2087,7 +1995,7 @@ local function createGUI()
 	return screenGui, btnContainer, settingsMenu, laserSettingsMenu
 end
 
-print("Parça 5 Yüklendi")-- ========== PARÇA 6: KARAKTER YÜKLEME VE ANA DÖNGÜ ==========
+print("Parça 5 Yüklendi - GUI (Takeoff Mode ayara eklendi)")-- ========== PARÇA 6: KARAKTER YÜKLEME VE ANA DÖNGÜ ==========
 local shared = _G.HomelanderShared
 if not shared then warn("Önceki parçaları çalıştırın!") return end
 
@@ -2165,10 +2073,6 @@ if shared.setReloadCallback then shared.setReloadCallback(loadAnimations) end
 
 local lastTime = tick()
 runService.RenderStepped:Connect(function(dt)
-	if shared.takeoffPlaying then
-		return
-	end
-
 	local now = tick()
 	dt = math.min(now - lastTime, 0.033)
 	lastTime = now
@@ -2269,8 +2173,8 @@ player.CharacterRemoving:Connect(function()
 	character = nil; humanoid = nil; animator = nil; rootPart = nil
 end)
 
-print("Parça 6 Yüklendi")
-print("=== HOMELANDER SİSTEMİ TAMAMEN YÜKLENDİ ===")
+print("Parça 6 Yüklendi - Karakter yükleme ve ana döngü")
+print("=== HOMELANDER SİSTEMİ TAMAMEN YÜKLENDİ (3 modlu Takeoff) ===")
 
 -- NDS özel
 local pid = game.PlaceId
