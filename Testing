@@ -44,7 +44,7 @@ _G.HomelanderShared.settings = {
 	laserIdleEnabled = true,
 	shoulderCamera = false,
 	cameraOffset = 0,
-	takeoffCutsceneMode = 2, -- 0: Kapalı, 1: Emote+Kalkış (kamera yok), 2: Full cutscene
+	takeoffCutsceneMode = 2,
 	cameraStyle = "Random",
 }
 
@@ -99,7 +99,7 @@ getgenv().FPDH = workspace.FallenPartsDestroyHeight
 
 _G.HomelanderShared.takeoffPlaying = false
 _G.HomelanderShared.takeoffSound = nil
-_G.HomelanderShared.cutsceneIndex = 0 -- 0,1,2 sırayla
+_G.HomelanderShared.cutsceneIndex = 0
 
 print("Parça 1 Yüklendi")-- ========== PARÇA 2: FLING MOTORU ==========
 function _G.HomelanderShared.SkidFling(TargetPlayer)
@@ -416,10 +416,10 @@ local function tweenFOV(from, to, duration)
 	end)
 end
 
--- ===== YENİ CUTSCENE SİSTEMİ =====
+-- ===== CUTSCENE FONKSİYONLARI =====
 local function applyCutscene(dt)
 	if not rootPart or not camera then return end
-	if shared.settings.takeoffCutsceneMode ~= 2 then return end -- sadece full modda
+	if shared.settings.takeoffCutsceneMode ~= 2 then return end
 
 	local pos = rootPart.Position
 	local look = rootPart.CFrame.LookVector
@@ -428,46 +428,35 @@ local function applyCutscene(dt)
 	local elapsed = tick() - cutsceneStartTime
 
 	if currentCutsceneIndex == 0 then
-		-- Cutscene 1
 		if elapsed < 1 then
-			-- 0-1s: karakterin önü 5 stud
 			local offset = pos + look * 5 + Vector3.new(0, 1, 0)
 			camera.CFrame = CFrame.lookAt(offset, pos)
 		elseif elapsed < 2.5 then
-			-- 1-2.5s: karakterin arkası 10 stud
 			local offset = pos - look * 10 + Vector3.new(0, 2, 0)
 			camera.CFrame = CFrame.lookAt(offset, pos)
 		else
-			-- 2.5s+: yukarıdan kafaya bakar
 			local offset = pos + Vector3.new(0, 3, 0) + look * 1.5
 			camera.CFrame = CFrame.lookAt(offset, pos)
 		end
 	elseif currentCutsceneIndex == 1 then
-		-- Cutscene 2
 		if elapsed < 1 then
-			-- 0-1s: yüzüne bakar
 			local offset = pos + look * 9 + Vector3.new(0, 1, 0)
 			camera.CFrame = CFrame.lookAt(offset, pos)
 		elseif elapsed < 1.75 then
-			-- 1-1.75s: Emote oynarken 50 stud arka çapraz
 			local offset = pos - look * 40 + right * 30 + Vector3.new(0, 3, 0)
 			camera.CFrame = CFrame.lookAt(offset, pos)
 		elseif elapsed < 4.75 then
-			-- Havalanırken kamera karaktere doğru döner (arkadan öne doğru)
-			local progress = (elapsed - 1.75) / 3 -- 0-1 arası
-			local angle = math.rad(progress * 180) -- 0-180 derece dönüş
+			local progress = (elapsed - 1.75) / 3
+			local angle = math.rad(progress * 180)
 			local radius = 50
 			local offset = pos + Vector3.new(math.sin(angle) * radius, 2 + progress * 5, math.cos(angle) * radius)
 			camera.CFrame = CFrame.lookAt(offset, pos)
 		end
 	elseif currentCutsceneIndex == 2 then
-		-- Cutscene 3
 		if elapsed < 1.75 then
-			-- Emote oynarken 10 stud yukarı çapraz
 			local offset = pos - look * 7 + Vector3.new(0, 10, 0)
 			camera.CFrame = CFrame.lookAt(offset, pos)
 		else
-			-- Havalanırken hep arkasında
 			local offset = pos - look * 12 + Vector3.new(0, 3, 0)
 			camera.CFrame = CFrame.lookAt(offset, pos)
 		end
@@ -477,7 +466,6 @@ end
 local function startCutscene()
 	if takeoffCutsceneConnection then takeoffCutsceneConnection:Disconnect() end
 	
-	-- Sıradaki cutscene index'ini al (0,1,2 döngü)
 	currentCutsceneIndex = shared.cutsceneIndex or 0
 	shared.cutsceneIndex = (shared.cutsceneIndex + 1) % 3
 	
@@ -499,7 +487,7 @@ local function stopCutscene()
 	end
 end
 
--- ===== START FLY (SİNEMATİK TAKEOFF - 3 MODLU) =====
+-- ===== START FLY =====
 local function startFly()
 	if shared.flying then return end
 	if not humanoid or not rootPart then return end
@@ -528,7 +516,6 @@ local function startFly()
 
 	local mode = shared.settings.takeoffCutsceneMode
 	if mode == 0 then
-		-- Mod 0: Tamamen kapalı, direkt uçuş
 		shared.flying = true
 		updateSpeed()
 		updateCollision()
@@ -550,13 +537,11 @@ local function startFly()
 		return
 	end
 
-	-- Mod 1 veya 2: Emote + kalkış (mod 1'de kamera yok)
 	local oldCameraFollow = shared.settings.cameraFollow
 	if oldCameraFollow then
 		shared.settings.cameraFollow = false
 	end
 
-	-- === TAKE-OFF SESİ BAŞLAT (1 saniye sadece ses) ===
 	local sound = Instance.new("Sound")
 	sound.SoundId = "rbxassetid://139473062598949"
 	sound.Volume = 1
@@ -565,27 +550,28 @@ local function startFly()
 	sound:Play()
 	shared.takeoffSound = sound
 
-	-- 1 saniye bekle (hiçbir şey olmasın, sadece ses çalsın)
 	task.wait(1)
 
 	shared.takeoffPlaying = true
 
-	-- Mod 2'de cutscene başlat
 	if mode == 2 then
-		-- Kamerayı önce 10 stud öne al (Emote öncesi)
 		local frontPos = rootPart.Position + rootPart.CFrame.LookVector * 10 + Vector3.new(0, 1, 0)
 		camera.CFrame = CFrame.lookAt(frontPos, rootPart.Position)
 		startCutscene()
 	end
 
-	-- Emote 1 oynat (0.75 saniye)
 	playAnimation("Emote", 1)
-	task.wait(0.75)
+	
+	task.delay(0.60, function()
+		if shared.takeoffSound and shared.takeoffSound.IsPlaying then
+			shared.takeoffSound:Play()
+		end
+	end)
+	
+	task.wait(0.80)
 
-	-- Fly animasyonu başlat
 	playAnimation("Fly", 1)
 
-	-- BodyVelocity ve BodyGyro oluştur
 	if not bodyVelocity then
 		bodyVelocity = Instance.new("BodyVelocity")
 		bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
@@ -599,13 +585,17 @@ local function startFly()
 		bodyGyro.Parent = rootPart
 	end
 
-	-- BodyGyro'yu anında yukarı yöne çevir
-	bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + Vector3.new(0, 1, 0))
+	local currentLook = rootPart.CFrame.LookVector
+	local flatLook = Vector3.new(currentLook.X, 0, currentLook.Z)
+	if flatLook.Magnitude > 0.001 then
+		flatLook = flatLook.Unit
+	else
+		flatLook = Vector3.new(0, 0, -1)
+	end
+	bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + flatLook, Vector3.new(0, 1, 0))
 
-	-- FOV 70 → 85 (0.25 saniye)
 	tweenFOV(70, 85, 0.25)
 
-	-- 3 saniye boyunca kademeli olarak 0'dan 800'e çık
 	local startTime = tick()
 	local rampDuration = 3
 	local startVel = 0
@@ -623,40 +613,39 @@ local function startFly()
 		end
 	end)
 
-	-- 3 saniye boyunca yüksel (bekle)
 	task.wait(rampDuration)
 
-	-- FOV 85 → 70 (0.25 saniye)
 	tweenFOV(85, 70, 0.25)
 
-	-- Cutscene'i durdur (mod 2 ise)
 	if mode == 2 then
 		stopCutscene()
 	end
 
-	-- Ses bitene kadar çalsın (eğer hala çalıyorsa)
 	if shared.takeoffSound and shared.takeoffSound.IsPlaying then
 		task.wait(shared.takeoffSound.TimeLength - shared.takeoffSound.TimePosition)
 	end
 
-	-- Ses nesnesini temizle
 	if shared.takeoffSound then
 		shared.takeoffSound:Stop()
 		shared.takeoffSound:Destroy()
 		shared.takeoffSound = nil
 	end
 
-	-- BodyGyro'yu dümdüz öne hizala (dik duruş)
-	bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + rootPart.CFrame.LookVector)
+	local currentLook2 = rootPart.CFrame.LookVector
+	local flatLook2 = Vector3.new(currentLook2.X, 0, currentLook2.Z)
+	if flatLook2.Magnitude > 0.001 then
+		flatLook2 = flatLook2.Unit
+	else
+		flatLook2 = Vector3.new(0, 0, -1)
+	end
+	bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + flatLook2, Vector3.new(0, 1, 0))
 
-	-- Kalkış bitti, normal uçuşa geç
 	shared.takeoffPlaying = false
 	shared.flying = true
 	updateSpeed()
 	updateCollision()
 	bodyVelocity.Velocity = Vector3.zero
 
-	-- Camera follow'u eski haline döndür
 	shared.settings.cameraFollow = oldCameraFollow
 	if oldCameraFollow then
 		local look, up = camera.CFrame.LookVector, camera.CFrame.UpVector
@@ -751,7 +740,7 @@ local function performLanding()
 			end
 		end
 	end
-		shared.currentTrack = nil
+	shared.currentTrack = nil
 	shared.currentType = nil
 	shared.oldWalkSpeed = humanoid.WalkSpeed
 	shared.oldJumpPower = humanoid.JumpPower
@@ -879,10 +868,7 @@ if not shared then warn("Parça 1-3'ü çalıştırın!") return end
 
 local TweenService = game:GetService("TweenService")
 
--- LAZER SESLERİ
-local LASER_START_SOUND_ID = "rbxassetid://79016124077522"
-local LASER_LOOP_SOUND_ID = "rbxassetid://121549896249098"  -- YENİ
-local LASER_END_SOUND_ID = "rbxassetid://75551379006890"
+local LASER_SOUND_ID = "rbxassetid://114537309582892"
 
 local vignetteGui
 local vignetteImage
@@ -890,6 +876,8 @@ local vignetteTween
 local laserShakeConnection = nil
 local laserLoopConnection = nil
 local laserSound = nil
+local laserSoundAlt = nil
+local isCrossfading = false
 
 local function CreateGodBubble(text, offset)
 	local billboard = Instance.new("BillboardGui")
@@ -1026,77 +1014,110 @@ local function StopLaserShake()
 	end
 end
 
+-- ===== LAZER SES FONKSİYONLARI (CROSSFADE'Lİ LOOP) =====
 local function startLaserSound()
-    if laserSound then
-        laserSound:Stop()
-        laserSound:Destroy()
-        laserSound = nil
-    end
-    if laserLoopConnection then
-        laserLoopConnection:Disconnect()
-        laserLoopConnection = nil
-    end
-
+    if laserSound then laserSound:Stop(); laserSound:Destroy(); laserSound = nil end
+    if laserSoundAlt then laserSoundAlt:Stop(); laserSoundAlt:Destroy(); laserSoundAlt = nil end
+    if laserLoopConnection then laserLoopConnection:Disconnect(); laserLoopConnection = nil end
+    isCrossfading = false
+    
     local head = character and character:FindFirstChild("Head") or character
     if not head then return end
-
-    local startSound = Instance.new("Sound")
-    startSound.SoundId = LASER_START_SOUND_ID
-    startSound.Volume = 1
-    startSound.Looped = false
-    startSound.Parent = head
-    startSound:Play()
-
-    startSound.Ended:Connect(function()
-        startSound:Destroy()
-        if not shared.laserActive then return end
-        
-        laserSound = Instance.new("Sound")
-        laserSound.SoundId = LASER_LOOP_SOUND_ID
-        laserSound.Volume = 0.8
-        laserSound.Looped = true
-        laserSound.Parent = head
+    
+    laserSound = Instance.new("Sound")
+    laserSound.SoundId = LASER_SOUND_ID
+    laserSound.Volume = 1
+    laserSound.Looped = false
+    laserSound.Parent = head
+    laserSound.TimePosition = 0
+    laserSound:Play()
+    
+    task.wait(0.80)
+    
+    if laserSound and shared.laserActive then
+        laserSound.TimePosition = 0.80
         laserSound:Play()
-    end)
-
-    task.delay(3, function()
-        if startSound and startSound.IsPlaying then
-            startSound:Stop()
-            startSound:Destroy()
-            if shared.laserActive and not laserSound then
-                laserSound = Instance.new("Sound")
-                laserSound.SoundId = LASER_LOOP_SOUND_ID
-                laserSound.Volume = 0.8
-                laserSound.Looped = true
-                laserSound.Parent = head
-                laserSound:Play()
+        
+        laserSoundAlt = Instance.new("Sound")
+        laserSoundAlt.SoundId = LASER_SOUND_ID
+        laserSoundAlt.Volume = 0
+        laserSoundAlt.Looped = false
+        laserSoundAlt.Parent = head
+        laserSoundAlt.TimePosition = 0.80
+        laserSoundAlt:Play()
+        
+        laserLoopConnection = runService.RenderStepped:Connect(function()
+            if not laserSound or not shared.laserActive then
+                if laserLoopConnection then laserLoopConnection:Disconnect(); laserLoopConnection = nil end
+                return
             end
-        end
-    end)
+            
+            local currentTime = laserSound.TimePosition
+            
+            if currentTime >= 1.70 and not isCrossfading then
+                isCrossfading = true
+                
+                if laserSoundAlt then
+                    laserSoundAlt.TimePosition = 0.80
+                    laserSoundAlt:Play()
+                end
+                
+                local tweenInfo = TweenInfo.new(0.14, Enum.EasingStyle.Linear)
+                local tween1 = TweenService:Create(laserSound, tweenInfo, {Volume = 0})
+                local tween2 = TweenService:Create(laserSoundAlt, tweenInfo, {Volume = 1})
+                
+                tween1:Play()
+                tween2:Play()
+                
+                tween1.Completed:Connect(function()
+                    if laserSound and laserSoundAlt then
+                        laserSound:Stop()
+                        laserSound:Destroy()
+                        laserSound = laserSoundAlt
+                        laserSoundAlt = nil
+                        isCrossfading = false
+                        
+                        local head2 = character and character:FindFirstChild("Head") or character
+                        if head2 and shared.laserActive then
+                            laserSoundAlt = Instance.new("Sound")
+                            laserSoundAlt.SoundId = LASER_SOUND_ID
+                            laserSoundAlt.Volume = 0
+                            laserSoundAlt.Looped = false
+                            laserSoundAlt.Parent = head2
+                            laserSoundAlt.TimePosition = 0.80
+                            laserSoundAlt:Play()
+                        end
+                    end
+                end)
+            end
+        end)
+    end
 end
 
 local function stopLaserSound()
+    if laserLoopConnection then laserLoopConnection:Disconnect(); laserLoopConnection = nil end
     if laserSound then
         laserSound:Stop()
         laserSound:Destroy()
         laserSound = nil
     end
-    if laserLoopConnection then
-        laserLoopConnection:Disconnect()
-        laserLoopConnection = nil
+    if laserSoundAlt then
+        laserSoundAlt:Stop()
+        laserSoundAlt:Destroy()
+        laserSoundAlt = nil
     end
-
+    isCrossfading = false
+    
     local head = character and character:FindFirstChild("Head") or character
     if head then
         local endSound = Instance.new("Sound")
-        endSound.SoundId = LASER_END_SOUND_ID
+        endSound.SoundId = LASER_SOUND_ID
         endSound.Volume = 1
         endSound.Looped = false
+        endSound.TimePosition = 2.70
         endSound.Parent = head
         endSound:Play()
-        endSound.Ended:Connect(function()
-            endSound:Destroy()
-        end)
+        endSound.Ended:Connect(function() endSound:Destroy() end)
     end
 end
 
@@ -1179,7 +1200,7 @@ shared.toggleLaser = toggleLaser
 shared.updateLaser = updateLaser
 shared.stopLaserSound = stopLaserSound
 
-print("Parça 4 Yüklendi (Loop sesi güncellendi)")-- ========== PARÇA 5: GUI VE BUTONLAR ==========
+print("Parça 4 Yüklendi (Crossfade'li loop: 1.70-1.84 arası geçiş)")-- ========== PARÇA 5: GUI VE BUTONLAR ==========
 local shared = _G.HomelanderShared
 if not shared then
     warn("Lütfen önce Parça 1-4'ü çalıştırın!")
@@ -1399,7 +1420,6 @@ local function CreateQuoteMenu(parent)
 						TextChatService.TextChannels.RBXGeneral:SendAsync(selected.text)
 					end)
 				end
-				-- Tek ses
 				if selected.soundId then
 					local sound = Instance.new("Sound")
 					sound.SoundId = selected.soundId
@@ -1408,7 +1428,6 @@ local function CreateQuoteMenu(parent)
 					sound:Play()
 					sound.Ended:Connect(function() sound:Destroy() end)
 				end
-				-- Birden fazla ses (sırayla oynat, her ses bitince 1 saniye bekle)
 				if selected.soundIds and #selected.soundIds > 0 then
 					task.spawn(function()
 						for idx, id in ipairs(selected.soundIds) do
