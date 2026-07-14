@@ -175,7 +175,7 @@ runService.RenderStepped:Connect(function()
     end
 end)
 
-print("Parça 2 Yüklendi - Fling motoru")-- ========== PARÇA 3: ANİMASYON, UÇUŞ, KAMERA, LANDING, TAKEOFF ==========
+print("Parça 2 Yüklendi - Fling motoru")-- ========== PARÇA 3: ANİMASYON, UÇUŞ, KAMERA, LANDING, TAKEOFF (DÜZELTİLMİŞ) ==========
 local shared = _G.HomelanderShared
 if not shared then warn("Parça 1'i çalıştırın!") return end
 
@@ -436,7 +436,7 @@ local function stopFly(noCrossfade)
 	updateIdleState()
 end
 
--- ========== TAKEOFF CUTSCENE SİSTEMİ ==========
+-- ========== TAKEOFF CUTSCENE SİSTEMİ (DÜZELTİLMİŞ) ==========
 function shared.startTakeoff()
 	if takeoffActive or not character or not rootPart then return end
 	takeoffActive = true
@@ -474,15 +474,13 @@ function shared.startTakeoff()
 	-- Emote bitene kadar bekle
 	task.wait(emoteDuration)
 	
-	-- Emote bitti, karakteri dikey hizala (yukarı)
-	local lookUp = Vector3.new(0, 1, 0)
-	local gyro = Instance.new("BodyGyro")
-	gyro.MaxTorque = Vector3.new(9e6, 9e6, 9e6)
-	gyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + lookUp)
-	gyro.Parent = rootPart
+	-- Emote bitti, şimdi GERÇEKTEN uçuşu başlat
+	flying = true
+	shared.flying = true
+	startFly() -- startFly çağrılıyor, bodyVelocity ve bodyGyro oluşuyor
 	
-	-- Fly animasyonunu başlat (1. Fly animasyonu)
-	shared.playAnimation("Fly", 1)
+	-- Yükseliş boyunca Fly animasyonu 1'i zorla oynat
+	playAnimation("Fly", 1)
 	
 	-- BodyVelocity ile yukarı fırlat (500 stud, 5 saniye)
 	local bvTakeoff = Instance.new("BodyVelocity")
@@ -490,49 +488,50 @@ function shared.startTakeoff()
 	bvTakeoff.Velocity = Vector3.new(0, 100, 0) -- 5 saniyede 500 stud
 	bvTakeoff.Parent = rootPart
 	
-	-- 5 saniye boyunca yüksel
+	-- BodyGyro ile yukarı bakmasını sağla
+	local lookUp = Vector3.new(0, 1, 0)
+	local gyroTakeoff = Instance.new("BodyGyro")
+	gyroTakeoff.MaxTorque = Vector3.new(9e6, 9e6, 9e6)
+	gyroTakeoff.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + lookUp)
+	gyroTakeoff.Parent = rootPart
+	
+	-- 5 saniye boyunca yüksel (Fly animasyonu sabit kalır)
 	local duration = 5
 	local elapsed = 0
 	while elapsed < duration do
 		local dt = task.wait()
 		elapsed = elapsed + dt
-		-- Gyro ile yönü sabit tut (yukarı)
-		if gyro and gyro.Parent then
-			gyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + lookUp)
+		-- Gyro ile yönü yukarı sabit tut
+		if gyroTakeoff and gyroTakeoff.Parent then
+			gyroTakeoff.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + lookUp)
+		end
+		-- Fly animasyonunu zorla koru
+		if shared.currentType ~= "Fly" then
+			playAnimation("Fly", 1)
 		end
 	end
 	
-	-- Zirveye ulaşıldı, gyro ve bv'yi temizle
-	if gyro then gyro:Destroy() end
+	-- Zirveye ulaşıldı, geçici bodyVelocity ve gyro'yu temizle
 	if bvTakeoff then bvTakeoff:Destroy() end
+	if gyroTakeoff then gyroTakeoff:Destroy() end
 	
-	-- Fly animasyonunu durdur
-	shared.stopCurrentTrack()
-	
-	-- Karakteri kameranın baktığı yöne döndür
+	-- Karakteri kameranın baktığı yöne döndür (mevcut bodyGyro ile)
 	local camLook = camera.CFrame.LookVector
 	local flatLook = Vector3.new(camLook.X, 0, camLook.Z)
 	if flatLook.Magnitude > 0 then flatLook = flatLook.Unit else flatLook = Vector3.new(1, 0, 0) end
 	
-	local gyroNew = Instance.new("BodyGyro")
-	gyroNew.MaxTorque = Vector3.new(9e6, 9e6, 9e6)
-	gyroNew.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + flatLook)
-	gyroNew.Parent = rootPart
+	if bodyGyro then
+		bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + flatLook)
+	end
 	
-	task.wait(0.1)
-	if gyroNew then gyroNew:Destroy() end
-	
-	-- Normal uçuşa geç
+	-- Kontrolleri aç - artık normal uçuş sistemi devralır
 	takeoffActive = false
 	shared.settings.buttonsLocked = false
 	
-	-- Uçuşu başlat
-	flying = true
-	shared.flying = true
-	shared.startFly()
-	
-	-- Uçuş animasyonunu güncelle
+	-- updateIdleState'i çağır ki hareket durumuna göre animasyon güncellensin
 	shared.updateIdleState()
+	
+	print("Takeoff tamamlandı, normal uçuşa geçildi.")
 end
 
 -- ========== LANDING ==========
@@ -688,7 +687,7 @@ shared.updateCamera = updateCamera
 shared.setReloadCallback = function(cb) reloadAnimationsCallback = cb end
 shared.destroyLaserObjects = destroyLaserObjects
 
-print("Parça 3 Yüklendi - Takeoff cutscene eklendi, shoulder offset güncellendi")-- ========== PARÇA 4: LAZER SİSTEMİ, GOD DAMN IT! BUBBLE, VIGNETTE VE SHAKE ==========
+print("Parça 3 Yüklendi - Takeoff düzeltildi (startFly çağrılıyor, Fly animasyonu zorla korunuyor)")-- ========== PARÇA 4: LAZER SİSTEMİ, GOD DAMN IT! BUBBLE, VIGNETTE VE SHAKE ==========
 local shared = _G.HomelanderShared
 if not shared then warn("Parça 1-3'ü çalıştırın!") return end
 
