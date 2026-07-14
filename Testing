@@ -42,8 +42,8 @@ _G.HomelanderShared.settings = {
 	laserFlingEnabled = true,
 	laserIdleEnabled = true,
 	shoulderCamera = false,
-	cameraOffset = 0,          -- YENİ
-	takeoffCutscene = true,    -- YENİ
+	cameraOffset = 0,
+	takeoffCutscene = true,
 }
 
 _G.HomelanderShared.laserSettings = {
@@ -194,6 +194,8 @@ local reloadAnimationsCallback = nil
 local godBubbleGui, godBubbleLabel
 local bubbleCoroutine = nil
 
+local gyroTweenConnection = nil
+
 local function getLaserColors()
 	local preset = shared.laserSettings.colorPreset or "Classic"
 	if preset == "Homelander" then
@@ -297,6 +299,14 @@ local function checkEmoteCancel()
 	end
 end
 
+local function updateSpeed()
+	if shared.floating then
+		shared.currentSpeed = shared.floatingSpeed or 30
+	else
+		shared.currentSpeed = shared.flySpeed or 90
+	end
+end
+
 local function updateSmoothEffects(dt)
 	if not shared.flying and not shared.floating then
 		shared.targetIntensity, shared.targetZoom = 0, 0
@@ -360,13 +370,34 @@ local function updateCollision()
 	if rootPart then rootPart.CanCollide = not shared.flying and not shared.floating end
 end
 
--- ===== TAKEOFF SİSTEMİ (DÜZELTİLMİŞ - İLK ÇALIŞAN HALİ) =====
+local function tweenGyro(targetCFrame, duration)
+	if gyroTweenConnection then
+		gyroTweenConnection:Disconnect()
+		gyroTweenConnection = nil
+	end
+	if not bodyGyro then return end
+	local startCF = bodyGyro.CFrame
+	local startTime = tick()
+	gyroTweenConnection = runService.RenderStepped:Connect(function()
+		local elapsed = tick() - startTime
+		local alpha = math.min(elapsed / duration, 1)
+		local current = startCF:Lerp(targetCFrame, alpha)
+		bodyGyro.CFrame = current
+		if alpha >= 1 then
+			gyroTweenConnection:Disconnect()
+			gyroTweenConnection = nil
+		end
+	end)
+end
+
+-- ===== TAKEOFF =====
 local function startFly()
 	if shared.flying then return end
 	if not humanoid or not rootPart then return end
 
 	if humanoid.FloorMaterial == Enum.Material.Air or shared.floating then
 		shared.flying = true
+		updateSpeed()
 		updateCollision()
 		bodyVelocity = Instance.new("BodyVelocity")
 		bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
@@ -388,6 +419,7 @@ local function startFly()
 
 	if not shared.settings.takeoffCutscene then
 		shared.flying = true
+		updateSpeed()
 		updateCollision()
 		bodyVelocity = Instance.new("BodyVelocity")
 		bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
@@ -414,7 +446,6 @@ local function startFly()
 
 	shared.takeoffPlaying = true
 
-	-- === SES ===
 	local sound = Instance.new("Sound")
 	sound.SoundId = "rbxassetid://139473062598949"
 	sound.Volume = 1
@@ -425,19 +456,16 @@ local function startFly()
 
 	task.wait(1)
 
-	-- Emote 1 oynat (0.80 saniye)
 	playAnimation("Emote", 1)
 
-	-- Sesin kalanı: emote bitmeden 0.2 saniye önce (0.60 saniye sonra)
-	task.delay(0.60, function()
+	task.delay(0.1, function()
 		if shared.takeoffSound and shared.takeoffSound.IsPlaying then
 			shared.takeoffSound:Play()
 		end
 	end)
 
-	task.wait(0.80)
+	task.wait(0.75)
 
-	-- Fly animasyonu başlat
 	playAnimation("Fly", 1)
 
 	if not bodyVelocity then
@@ -453,72 +481,35 @@ local function startFly()
 		bodyGyro.Parent = rootPart
 	end
 
-	-- BodyGyro'yu anında yukarı yöne çevir (düzgün hizalama)
-	bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + Vector3.new(0, 1, 0))
+	local upCF = CFrame.lookAt(rootPart.Position, rootPart.Position + Vector3.new(0, 1, 0))
+	tweenGyro(upCF, 0.25)
 
-	-- FOV 70 → 85 (0.25 saniye)
-	local function tweenFOV(from, to, duration)
-		local startFOV = from or camera.FieldOfView
-		local targetFOV = to
-		local startTime = tick()
-		local con
-		con = runService.RenderStepped:Connect(function()
-			local elapsed = tick() - startTime
-			local alpha = math.min(elapsed / duration, 1)
-			local current = startFOV + (targetFOV - startFOV) * alpha
-			camera.FieldOfView = current
-			if alpha >= 1 then
-				con:Disconnect()
-			end
-		end)
-	end
-	tweenFOV(70, 85, 0.25)
+	bodyVelocity.Velocity = Vector3.new(0, 200, 0)
+	task.wait(1)
 
-	-- 3 saniye boyunca kademeli 0 → 800
-	local startTime = tick()
-	local rampDuration = 3
-	local startVel = 0
-	local targetVel = 800
-	local rampConnection
-	rampConnection = runService.RenderStepped:Connect(function(dt)
-		local elapsed = tick() - startTime
-		local alpha = math.min(elapsed / rampDuration, 1)
-		local smoothAlpha = alpha * alpha * (3 - 2 * alpha)
-		local currentVel = startVel + (targetVel - startVel) * smoothAlpha
-		bodyVelocity.Velocity = Vector3.new(0, currentVel, 0)
-		if alpha >= 1 then
-			rampConnection:Disconnect()
-			bodyVelocity.Velocity = Vector3.new(0, targetVel, 0)
-		end
-	end)
+	local look, up = camera.CFrame.LookVector, camera.CFrame.UpVector
+	local targetCF = CFrame.lookAt(rootPart.Position, rootPart.Position + look, up)
+	tweenGyro(targetCF, 0.25)
 
-	task.wait(rampDuration)
-
-	tweenFOV(85, 70, 0.25)
-
-	-- Ses bitene kadar bekle
 	if shared.takeoffSound and shared.takeoffSound.IsPlaying then
 		task.wait(shared.takeoffSound.TimeLength - shared.takeoffSound.TimePosition)
 	end
-
 	if shared.takeoffSound then
 		shared.takeoffSound:Stop()
 		shared.takeoffSound:Destroy()
 		shared.takeoffSound = nil
 	end
 
-	-- BodyGyro'yu dümdüz öne hizala (karakter dik)
-	bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + rootPart.CFrame.LookVector)
-
 	shared.takeoffPlaying = false
 	shared.flying = true
+	updateSpeed()
 	updateCollision()
 	bodyVelocity.Velocity = Vector3.zero
 
 	shared.settings.cameraFollow = oldCameraFollow
 	if oldCameraFollow then
-		local look, up = camera.CFrame.LookVector, camera.CFrame.UpVector
-		bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + look, up)
+		local look2, up2 = camera.CFrame.LookVector, camera.CFrame.UpVector
+		bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + look2, up2)
 	end
 end
 
@@ -528,6 +519,7 @@ local function startFloating()
 		reloadAnimationsCallback(character)
 	end
 	shared.floating = true
+	updateSpeed()
 	updateCollision()
 	bodyVelocity = Instance.new("BodyVelocity")
 	bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
@@ -553,6 +545,10 @@ local function stopFly(noCrossfade)
 	end
 	if bodyVelocity then bodyVelocity:Destroy(); bodyVelocity = nil end
 	if bodyGyro then bodyGyro:Destroy(); bodyGyro = nil end
+	if gyroTweenConnection then
+		gyroTweenConnection:Disconnect()
+		gyroTweenConnection = nil
+	end
 	updateCollision()
 	if shared.originalFOV then
 		camera.FieldOfView = shared.originalFOV
@@ -566,7 +562,6 @@ local function stopFly(noCrossfade)
 		stopCurrentTrack()
 	end
 	updateIdleState()
-
 	if shared.takeoffSound then
 		shared.takeoffSound:Stop()
 		shared.takeoffSound:Destroy()
@@ -720,12 +715,13 @@ shared.stopCurrentTrack = stopCurrentTrack
 shared.playAnimation = playAnimation
 shared.updateIdleState = updateIdleState
 shared.checkEmoteCancel = checkEmoteCancel
+shared.updateSpeed = updateSpeed
 shared.updateSmoothEffects = updateSmoothEffects
 shared.updateCamera = updateCamera
 shared.setReloadCallback = function(cb) reloadAnimationsCallback = cb end
 shared.destroyLaserObjects = destroyLaserObjects
 
-print("Parça 3 Yüklendi (Düzeltilmiş takeoff)")-- ========== PARÇA 4: LAZER SİSTEMİ, GOD DAMN IT! BUBBLE, VIGNETTE VE SHAKE ==========
+print("Parça 3 Yüklendi")-- ========== PARÇA 4: LAZER SİSTEMİ, GOD DAMN IT! BUBBLE, VIGNETTE VE SHAKE ==========
 local shared = _G.HomelanderShared
 if not shared then warn("Parça 1-3'ü çalıştırın!") return end
 
@@ -1008,9 +1004,9 @@ local randomMessages = {
 	{ text = "The only man in the sky, is me.", soundId = "rbxassetid://97863436735876" },
 	{ text = "I don't make mistakes. I'm not 'just like the rest of you.' I'm stronger. I'm smarter. I'm better. I am better.", soundId = "rbxassetid://126341171253122" },
 	{ text = "You people should be thanking Christ that I am who and what I am, because you need me. You need me to save you.", soundId = nil },
-	{ text = "You're not the real heroes. I'm the real hero. I'm the real hero.", soundId = "rbxassetid://74604762966737" },  -- YENİ
-	{ text = "What... kind of animal are you? (...) Do you like attacking your own kind? (...) Stay back.", soundIds = {"rbxassetid://96072517711492", "rbxassetid://128629488463881", "rbxassetid://118505793065934"} },  -- YENİ
-	{ text = "Hey You Stay Back! All Of You, Stay Back... HEY YOU STAY BACK OR I'M GONNA LASER YOU! I'LL LASER EVERY ONE OF YOU!", soundId = "rbxassetid://83199147226964" },  -- YENİ
+	{ text = "You're not the real heroes. I'm the real hero. I'm the real hero.", soundId = "rbxassetid://74604762966737" },
+	{ text = "What... kind of animal are you? (...) Do you like attacking your own kind? (...) Stay back.", soundIds = {"rbxassetid://96072517711492", "rbxassetid://128629488463881", "rbxassetid://118505793065934"} },
+	{ text = "Hey You Stay Back! All Of You, Stay Back... HEY YOU STAY BACK OR I'M GONNA LASER YOU! I'LL LASER EVERY ONE OF YOU!", soundId = "rbxassetid://83199147226964" },
 	{ text = "I AM GOD!", soundId = "rbxassetid://96586859247356" },
 	{ text = "hahaha...HAHAHAHAHA!", soundId = "rbxassetid://140589325002177" },
 	{ text = "Yummers", soundId = "rbxassetid://135085041040927" },
@@ -1203,7 +1199,6 @@ local function CreateQuoteMenu(parent)
 						TextChatService.TextChannels.RBXGeneral:SendAsync(selected.text)
 					end)
 				end
-				-- Tek ses
 				if selected.soundId then
 					local sound = Instance.new("Sound")
 					sound.SoundId = selected.soundId
@@ -1212,7 +1207,6 @@ local function CreateQuoteMenu(parent)
 					sound:Play()
 					sound.Ended:Connect(function() sound:Destroy() end)
 				end
-				-- Birden fazla ses (sırayla oynat, her ses bitince 1 saniye bekle)
 				if selected.soundIds and #selected.soundIds > 0 then
 					task.spawn(function()
 						for idx, id in ipairs(selected.soundIds) do
@@ -2054,6 +2048,11 @@ if shared.setReloadCallback then shared.setReloadCallback(loadAnimations) end
 
 local lastTime = tick()
 runService.RenderStepped:Connect(function(dt)
+	-- TAKEOFF SIRASINDA HAREKET KİLİTLİ
+	if shared.takeoffPlaying then
+		return
+	end
+
 	local now = tick()
 	dt = math.min(now - lastTime, 0.033)
 	lastTime = now
