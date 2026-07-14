@@ -42,6 +42,8 @@ _G.HomelanderShared.settings = {
 	laserFlingEnabled = true,
 	laserIdleEnabled = true,
 	shoulderCamera = false,
+	cutsceneEnabled = false,
+	shoulderOffsetX = 3.2,
 }
 
 _G.HomelanderShared.laserSettings = {
@@ -55,6 +57,7 @@ _G.HomelanderShared.laserSettings = {
 
 _G.HomelanderShared.flySpeed = 90
 _G.HomelanderShared.floatingSpeed = 30
+_G.HomelanderShared.takeoffSoundId = "rbxassetid://139473062598949"
 
 _G.HomelanderShared.flying = false
 _G.HomelanderShared.floating = false
@@ -89,7 +92,7 @@ _G.HomelanderShared.clientVisualCFrame = CFrame.new()
 getgenv().OldPos = nil
 getgenv().FPDH = workspace.FallenPartsDestroyHeight
 
-print("Parça 1 Yüklendi")-- ========== PARÇA 2: FLING MOTORU ==========
+print("Parça 1 Yüklendi - Değişkenler (Takeoff ses ID'si ve cutscene eklendi)")-- ========== PARÇA 2: FLING MOTORU ==========
 function _G.HomelanderShared.SkidFling(TargetPlayer)
     local Character = player.Character
     local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
@@ -172,7 +175,7 @@ runService.RenderStepped:Connect(function()
     end
 end)
 
-print("Parça 2 Yüklendi")-- ========== PARÇA 3: ANİMASYON, UÇUŞ, KAMERA, LANDING ==========
+print("Parça 2 Yüklendi - Fling motoru")-- ========== PARÇA 3: ANİMASYON, UÇUŞ, KAMERA, LANDING, TAKEOFF ==========
 local shared = _G.HomelanderShared
 if not shared then warn("Parça 1'i çalıştırın!") return end
 
@@ -188,6 +191,11 @@ local reloadAnimationsCallback = nil
 
 local godBubbleGui, godBubbleLabel
 local bubbleCoroutine = nil
+
+local takeoffActive = false
+local flying = false
+local floatingActive = false
+local flyAnimationVersion = 1
 
 local function getLaserColors()
 	local preset = shared.laserSettings.colorPreset or "Classic"
@@ -339,7 +347,11 @@ local function updateCamera(dt)
 		shared.shakeTime = 0
 	end
 	if shared.settings.shoulderCamera then
-		local shoulderOffset = Vector3.new(3.2, 1.3, -1.8)
+		local shoulderOffset = Vector3.new(
+			shared.settings.shoulderOffsetX or 3.2,
+			1.3,
+			-1.8
+		)
 		camera.CFrame = camera.CFrame * CFrame.new(shoulderOffset)
 	end
 end
@@ -424,6 +436,106 @@ local function stopFly(noCrossfade)
 	updateIdleState()
 end
 
+-- ========== TAKEOFF CUTSCENE SİSTEMİ ==========
+function shared.startTakeoff()
+	if takeoffActive or not character or not rootPart then return end
+	takeoffActive = true
+	
+	-- Kontrolleri kilitle
+	shared.settings.buttonsLocked = true
+	
+	-- Ses oluştur
+	local takeoffSound = Instance.new("Sound")
+	takeoffSound.SoundId = shared.takeoffSoundId
+	takeoffSound.Volume = 1
+	takeoffSound.Parent = character:FindFirstChild("Head") or character
+	takeoffSound.TimePosition = 0
+	takeoffSound:Play()
+	
+	-- 1 saniye bekle (sesin ilk kısmı oynarken hiçbir şey olmaz)
+	task.wait(1)
+	
+	-- Emote'u başlat
+	local emoteIdx = shared.currentIndices.Emote
+	shared.playAnimation("Emote", emoteIdx)
+	
+	-- Emote süresi (0.8 saniye)
+	local emoteDuration = 0.8
+	
+	-- Emote bitmeden 0.2 saniye önce sesin kalanını oynat
+	task.spawn(function()
+		task.wait(emoteDuration - 0.2)
+		if takeoffSound and takeoffSound.Parent then
+			takeoffSound.TimePosition = 1
+			takeoffSound:Play()
+		end
+	end)
+	
+	-- Emote bitene kadar bekle
+	task.wait(emoteDuration)
+	
+	-- Emote bitti, karakteri dikey hizala (yukarı)
+	local lookUp = Vector3.new(0, 1, 0)
+	local gyro = Instance.new("BodyGyro")
+	gyro.MaxTorque = Vector3.new(9e6, 9e6, 9e6)
+	gyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + lookUp)
+	gyro.Parent = rootPart
+	
+	-- Fly animasyonunu başlat (1. Fly animasyonu)
+	shared.playAnimation("Fly", 1)
+	
+	-- BodyVelocity ile yukarı fırlat (500 stud, 5 saniye)
+	local bvTakeoff = Instance.new("BodyVelocity")
+	bvTakeoff.MaxForce = Vector3.new(0, 9e6, 0)
+	bvTakeoff.Velocity = Vector3.new(0, 100, 0) -- 5 saniyede 500 stud
+	bvTakeoff.Parent = rootPart
+	
+	-- 5 saniye boyunca yüksel
+	local duration = 5
+	local elapsed = 0
+	while elapsed < duration do
+		local dt = task.wait()
+		elapsed = elapsed + dt
+		-- Gyro ile yönü sabit tut (yukarı)
+		if gyro and gyro.Parent then
+			gyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + lookUp)
+		end
+	end
+	
+	-- Zirveye ulaşıldı, gyro ve bv'yi temizle
+	if gyro then gyro:Destroy() end
+	if bvTakeoff then bvTakeoff:Destroy() end
+	
+	-- Fly animasyonunu durdur
+	shared.stopCurrentTrack()
+	
+	-- Karakteri kameranın baktığı yöne döndür
+	local camLook = camera.CFrame.LookVector
+	local flatLook = Vector3.new(camLook.X, 0, camLook.Z)
+	if flatLook.Magnitude > 0 then flatLook = flatLook.Unit else flatLook = Vector3.new(1, 0, 0) end
+	
+	local gyroNew = Instance.new("BodyGyro")
+	gyroNew.MaxTorque = Vector3.new(9e6, 9e6, 9e6)
+	gyroNew.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + flatLook)
+	gyroNew.Parent = rootPart
+	
+	task.wait(0.1)
+	if gyroNew then gyroNew:Destroy() end
+	
+	-- Normal uçuşa geç
+	takeoffActive = false
+	shared.settings.buttonsLocked = false
+	
+	-- Uçuşu başlat
+	flying = true
+	shared.flying = true
+	shared.startFly()
+	
+	-- Uçuş animasyonunu güncelle
+	shared.updateIdleState()
+end
+
+-- ========== LANDING ==========
 local function performLanding()
 	if shared.laserActive and shared.settings.laserFlingEnabled then
 		return
@@ -503,6 +615,7 @@ local function performLanding()
 	shared.landingPosition = nil
 end
 
+-- ========== LAZER BEAMLARI ==========
 local function createLaserBeams(offset)
 	local head = character and character:FindFirstChild("Head")
 	if not head then return nil end
@@ -575,7 +688,7 @@ shared.updateCamera = updateCamera
 shared.setReloadCallback = function(cb) reloadAnimationsCallback = cb end
 shared.destroyLaserObjects = destroyLaserObjects
 
-print("Parça 3 Yüklendi")-- ========== PARÇA 4: LAZER SİSTEMİ, GOD DAMN IT! BUBBLE, VIGNETTE VE SHAKE ==========
+print("Parça 3 Yüklendi - Takeoff cutscene eklendi, shoulder offset güncellendi")-- ========== PARÇA 4: LAZER SİSTEMİ, GOD DAMN IT! BUBBLE, VIGNETTE VE SHAKE ==========
 local shared = _G.HomelanderShared
 if not shared then warn("Parça 1-3'ü çalıştırın!") return end
 
@@ -830,7 +943,7 @@ shared.toggleLaser = toggleLaser
 shared.updateLaser = updateLaser
 shared.stopLaserSound = stopLaserSound
 
-print("Parça 4 Yüklendi")-- ========== PARÇA 5: GUI VE BUTONLAR ==========
+print("Parça 4 Yüklendi - Lazer sistemi")-- ========== PARÇA 5: GUI VE BUTONLAR ==========
 local shared = _G.HomelanderShared
 if not shared then
     warn("Lütfen önce Parça 1-4'ü çalıştırın!")
@@ -883,7 +996,8 @@ local randomDisplayNames = {
 local xrayEnabled, xrayAffectedParts = false, {}
 local supeEnabled, supeConnections, supeLabels = false, {}, {}
 local MAX_SUPE_MESSAGES = 15
-local homelanderActive, flying = false, false
+local homelanderActive = false
+local flying = false
 local floatingActive = false
 local flyAnimationVersion = 1
 
@@ -1317,8 +1431,8 @@ end
 local function createSettingsMenu(parent)
 	local menuFrame = Instance.new("Frame")
 	menuFrame.Name = "SettingsMenu"
-	menuFrame.Size = UDim2.new(0, 250, 0, 400)
-	menuFrame.Position = UDim2.new(0.5, -125, 0.5, -200)
+	menuFrame.Size = UDim2.new(0, 250, 0, 480)
+	menuFrame.Position = UDim2.new(0.5, -125, 0.5, -240)
 	menuFrame.BackgroundColor3 = Color3.new(0.1,0.1,0.15)
 	menuFrame.BackgroundTransparency = 0.1
 	menuFrame.BorderSizePixel = 0
@@ -1332,6 +1446,7 @@ local function createSettingsMenu(parent)
 	title.TextScaled = true
 	title.BackgroundTransparency = 1
 	title.Parent = menuFrame
+	
 	local function createOption(parent, text, yPos, getValue, setValue)
 		local btn = Instance.new("TextButton")
 		btn.Size = UDim2.new(0.9,0,0,40)
@@ -1347,13 +1462,61 @@ local function createSettingsMenu(parent)
 		updateText()
 		btn.MouseButton1Click:Connect(function() setValue(); updateText() end)
 	end
+	
 	createOption(menuFrame, "🎯 Camera Follow", 50, function() return shared.settings.cameraFollow and "ON" or "OFF" end, function() shared.settings.cameraFollow = not shared.settings.cameraFollow if (shared.flying or shared.floating) and shared.settings.cameraFollow and bodyGyro then bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + camera.CFrame.LookVector) end end)
 	createOption(menuFrame, "🌊 Camera Shake", 100, function() return shared.settings.cameraShake and "ON" or "OFF" end, function() shared.settings.cameraShake = not shared.settings.cameraShake end)
 	createOption(menuFrame, "🔍 Camera Zoom", 150, function() return shared.settings.cameraZoom and "ON" or "OFF" end, function() shared.settings.cameraZoom = not shared.settings.cameraZoom end)
 	createOption(menuFrame, "🔫 Lazer Fling", 200, function() return shared.settings.laserFlingEnabled and "ON" or "OFF" end, function() shared.settings.laserFlingEnabled = not shared.settings.laserFlingEnabled; updateButtonStates() end)
 	createOption(menuFrame, "💡 Laser Idle", 250, function() return shared.settings.laserIdleEnabled and "ON" or "OFF" end, function() shared.settings.laserIdleEnabled = not shared.settings.laserIdleEnabled; if shared.laserActive then shared.updateIdleState() end end)
 	createOption(menuFrame, "📷 Shoulder Camera", 300, function() return shared.settings.shoulderCamera and "ON" or "OFF" end, function() shared.settings.shoulderCamera = not shared.settings.shoulderCamera end)
-	createOption(menuFrame, "🔒 Lock Buttons", 350, function() return shared.settings.buttonsLocked and "ON" or "OFF" end, function() shared.settings.buttonsLocked = not shared.settings.buttonsLocked end)
+	createOption(menuFrame, "✈️ Cutscene", 350, function() return shared.settings.cutsceneEnabled and "ON" or "OFF" end, function() shared.settings.cutsceneEnabled = not shared.settings.cutsceneEnabled; updateButtonStates() end)
+	createOption(menuFrame, "🔒 Lock Buttons", 400, function() return shared.settings.buttonsLocked and "ON" or "OFF" end, function() shared.settings.buttonsLocked = not shared.settings.buttonsLocked end)
+	
+	-- Camera Offset sağ/sol butonları
+	local offsetFrame = Instance.new("Frame")
+	offsetFrame.Size = UDim2.new(0.9, 0, 0, 30)
+	offsetFrame.Position = UDim2.new(0.05, 0, 0.92, 0)
+	offsetFrame.BackgroundTransparency = 1
+	offsetFrame.Parent = menuFrame
+
+	local offsetLabel = Instance.new("TextLabel")
+	offsetLabel.Size = UDim2.new(0.5, 0, 1, 0)
+	offsetLabel.Text = "Offset X: " .. string.format("%.1f", shared.settings.shoulderOffsetX)
+	offsetLabel.TextColor3 = Color3.new(1,1,1)
+	offsetLabel.TextScaled = true
+	offsetLabel.BackgroundTransparency = 1
+	offsetLabel.Parent = offsetFrame
+
+	local leftBtn = Instance.new("TextButton")
+	leftBtn.Size = UDim2.new(0.2, 0, 1, 0)
+	leftBtn.Position = UDim2.new(0.6, 0, 0, 0)
+	leftBtn.Text = "◄"
+	leftBtn.TextColor3 = Color3.new(1,1,1)
+	leftBtn.TextScaled = true
+	leftBtn.BackgroundColor3 = Color3.new(0.2,0.2,0.3)
+	leftBtn.Parent = offsetFrame
+	leftBtn.MouseButton1Click:Connect(function()
+		if shared.settings.shoulderCamera then
+			shared.settings.shoulderOffsetX = shared.settings.shoulderOffsetX - 0.1
+			offsetLabel.Text = "Offset X: " .. string.format("%.1f", shared.settings.shoulderOffsetX)
+		end
+	end)
+
+	local rightBtn = Instance.new("TextButton")
+	rightBtn.Size = UDim2.new(0.2, 0, 1, 0)
+	rightBtn.Position = UDim2.new(0.8, 0, 0, 0)
+	rightBtn.Text = "►"
+	rightBtn.TextColor3 = Color3.new(1,1,1)
+	rightBtn.TextScaled = true
+	rightBtn.BackgroundColor3 = Color3.new(0.2,0.2,0.3)
+	rightBtn.Parent = offsetFrame
+	rightBtn.MouseButton1Click:Connect(function()
+		if shared.settings.shoulderCamera then
+			shared.settings.shoulderOffsetX = shared.settings.shoulderOffsetX + 0.1
+			offsetLabel.Text = "Offset X: " .. string.format("%.1f", shared.settings.shoulderOffsetX)
+		end
+	end)
+
 	local closeBtn = Instance.new("TextButton")
 	closeBtn.Size = UDim2.new(0,30,0,30)
 	closeBtn.Position = UDim2.new(1,-35,0,5)
@@ -1655,16 +1818,24 @@ local function createGUI()
 	end)
 
 	flyState.btn.MouseButton1Click:Connect(function()
-		if flying then
-			flying = false
-			shared.stopFly()
-		else
-			if floatingActive then
-				floatingActive = false
-				shared.stopFly()
+		if shared.settings.cutsceneEnabled then
+			-- Cutscene ON ise takeoff başlat
+			if not flying and not floatingActive then
+				shared.startTakeoff()
 			end
-			flying = true
-			shared.startFly()
+		else
+			-- Normal uçuş
+			if flying then
+				flying = false
+				shared.stopFly()
+			else
+				if floatingActive then
+					floatingActive = false
+					shared.stopFly()
+				end
+				flying = true
+				shared.startFly()
+			end
 		end
 		updateButtonStates()
 	end)
@@ -1751,9 +1922,7 @@ local function createGUI()
 	return screenGui, btnContainer, settingsMenu, laserSettingsMenu
 end
 
-print("Parça 5 Yüklendi")
-
--- ========== PARÇA 6: KARAKTER YÜKLEME VE ANA DÖNGÜ ==========
+print("Parça 5 Yüklendi - GUI (Cutscene ayarı ve Camera Offset eklendi)")-- ========== PARÇA 6: KARAKTER YÜKLEME VE ANA DÖNGÜ ==========
 local shared = _G.HomelanderShared
 if not shared then warn("Önceki parçaları çalıştırın!") return end
 
