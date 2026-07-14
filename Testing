@@ -360,7 +360,7 @@ local function updateCollision()
 	if rootPart then rootPart.CanCollide = not shared.flying and not shared.floating end
 end
 
--- ===== YENİ TAKEOFF SİSTEMİ =====
+-- ===== TAKEOFF SİSTEMİ (DÜZELTİLMİŞ - İLK ÇALIŞAN HALİ) =====
 local function startFly()
 	if shared.flying then return end
 	if not humanoid or not rootPart then return end
@@ -386,7 +386,6 @@ local function startFly()
 		return
 	end
 
-	-- Takeoff cutscene kapalıysa direkt uçuş
 	if not shared.settings.takeoffCutscene then
 		shared.flying = true
 		updateCollision()
@@ -408,7 +407,6 @@ local function startFly()
 		return
 	end
 
-	-- Camera follow'u geçici olarak kapat
 	local oldCameraFollow = shared.settings.cameraFollow
 	if oldCameraFollow then
 		shared.settings.cameraFollow = false
@@ -416,7 +414,7 @@ local function startFly()
 
 	shared.takeoffPlaying = true
 
-	-- === TAKE-OFF SESİ BAŞLAT (1 saniye bekle) ===
+	-- === SES ===
 	local sound = Instance.new("Sound")
 	sound.SoundId = "rbxassetid://139473062598949"
 	sound.Volume = 1
@@ -430,7 +428,7 @@ local function startFly()
 	-- Emote 1 oynat (0.80 saniye)
 	playAnimation("Emote", 1)
 
-	-- Sesin kalanı: emote bitmeden 0.2 saniye önce (0.60 saniye sonra) başlasın
+	-- Sesin kalanı: emote bitmeden 0.2 saniye önce (0.60 saniye sonra)
 	task.delay(0.60, function()
 		if shared.takeoffSound and shared.takeoffSound.IsPlaying then
 			shared.takeoffSound:Play()
@@ -442,7 +440,6 @@ local function startFly()
 	-- Fly animasyonu başlat
 	playAnimation("Fly", 1)
 
-	-- BodyVelocity ve BodyGyro oluştur
 	if not bodyVelocity then
 		bodyVelocity = Instance.new("BodyVelocity")
 		bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
@@ -456,7 +453,7 @@ local function startFly()
 		bodyGyro.Parent = rootPart
 	end
 
-	-- BodyGyro'yu anında yukarı yöne çevir
+	-- BodyGyro'yu anında yukarı yöne çevir (düzgün hizalama)
 	bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + Vector3.new(0, 1, 0))
 
 	-- FOV 70 → 85 (0.25 saniye)
@@ -477,11 +474,11 @@ local function startFly()
 	end
 	tweenFOV(70, 85, 0.25)
 
-	-- 5 saniye boyunca kademeli olarak 0'dan 500'e çık
+	-- 3 saniye boyunca kademeli 0 → 800
 	local startTime = tick()
-	local rampDuration = 5
+	local rampDuration = 3
 	local startVel = 0
-	local targetVel = 500
+	local targetVel = 800
 	local rampConnection
 	rampConnection = runService.RenderStepped:Connect(function(dt)
 		local elapsed = tick() - startTime
@@ -497,10 +494,9 @@ local function startFly()
 
 	task.wait(rampDuration)
 
-	-- FOV 85 → 70 (0.25 saniye)
 	tweenFOV(85, 70, 0.25)
 
-	-- Ses bitene kadar çalsın
+	-- Ses bitene kadar bekle
 	if shared.takeoffSound and shared.takeoffSound.IsPlaying then
 		task.wait(shared.takeoffSound.TimeLength - shared.takeoffSound.TimePosition)
 	end
@@ -511,22 +507,14 @@ local function startFly()
 		shared.takeoffSound = nil
 	end
 
-	-- BodyGyro'yu dümdüz öne hizala (dik duruş)
-	local currentLook = rootPart.CFrame.LookVector
-	local flatLook = Vector3.new(currentLook.X, 0, currentLook.Z)
-	if flatLook.Magnitude > 0.001 then
-		flatLook = flatLook.Unit
-	else
-		flatLook = Vector3.new(0, 0, -1)
-	end
-	bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + flatLook, Vector3.new(0, 1, 0))
+	-- BodyGyro'yu dümdüz öne hizala (karakter dik)
+	bodyGyro.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + rootPart.CFrame.LookVector)
 
 	shared.takeoffPlaying = false
 	shared.flying = true
 	updateCollision()
 	bodyVelocity.Velocity = Vector3.zero
 
-	-- Camera follow'u eski haline döndür
 	shared.settings.cameraFollow = oldCameraFollow
 	if oldCameraFollow then
 		local look, up = camera.CFrame.LookVector, camera.CFrame.UpVector
@@ -737,7 +725,7 @@ shared.updateCamera = updateCamera
 shared.setReloadCallback = function(cb) reloadAnimationsCallback = cb end
 shared.destroyLaserObjects = destroyLaserObjects
 
-print("Parça 3 Yüklendi (Takeoff sistemi eklendi)")-- ========== PARÇA 4: LAZER SİSTEMİ, GOD DAMN IT! BUBBLE, VIGNETTE VE SHAKE ==========
+print("Parça 3 Yüklendi (Düzeltilmiş takeoff)")-- ========== PARÇA 4: LAZER SİSTEMİ, GOD DAMN IT! BUBBLE, VIGNETTE VE SHAKE ==========
 local shared = _G.HomelanderShared
 if not shared then warn("Parça 1-3'ü çalıştırın!") return end
 
